@@ -1,6 +1,4 @@
 import { NextRequest } from 'next/server'
-import { promises as fs } from 'fs'
-import path from 'path'
 import crypto from 'crypto'
 import {
   requireAuth,
@@ -18,10 +16,11 @@ export const dynamic = 'force-dynamic'
 //   - multipart/form-data with a `file` field (recommended for large images)
 //   - JSON body: { "dataUrl": "data:image/png;base64,..." }  (for tiny uploads / data URLs)
 //
-// Returns: { "url": "/uploads/<random-name>.png" }
+// Returns: { "url": "data:image/<type>;base64,..." }
 //
-// Saves the file to /public/uploads/ and returns a server-relative URL that the
-// menu editor can store on MenuItem.image. Files are served statically by Next.
+// Images are stored as base64 data URLs directly in the database (MenuItem.image).
+// This works in ALL deployment environments — local dev, Vercel, Docker, serverless —
+// without requiring a writable filesystem.
 const MAX_BYTES = 5 * 1024 * 1024 // 5 MB (raised from 2 MB — phone photos are often larger)
 const ALLOWED_MIME = [
   'image/png',
@@ -30,13 +29,6 @@ const ALLOWED_MIME = [
   'image/gif',
   'image/svg+xml',
 ]
-const EXT_BY_MIME: Record<string, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'image/svg+xml': 'svg',
-}
 
 export async function POST(req: NextRequest) {
   // Anyone who can create OR update a menu item may upload an image for it.
@@ -135,27 +127,13 @@ export async function POST(req: NextRequest) {
     return fail('Uploaded file appears to be empty or corrupted.', 400)
   }
 
-  // Generate a random filename — never trust the client's filename (path traversal).
-  const ext = EXT_BY_MIME[mime] || 'bin'
-  const rand = crypto.randomBytes(8).toString('hex')
-  const filename = `${Date.now()}-${rand}.${ext}`
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-  const filePath = path.join(uploadDir, filename)
+  // Return a base64 data URL — no filesystem writes needed.
+  // This works in all deployment environments (Vercel, Docker, serverless, local).
+  const url = `data:${mime};base64,${buffer.toString('base64')}`
+  const filename = `upload-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`
 
-  try {
-    await fs.mkdir(uploadDir, { recursive: true })
-    await fs.writeFile(filePath, buffer)
-  } catch (err: any) {
-    console.error('[upload] write failed:', err)
-    return fail(
-      `Failed to save uploaded file: ${err.message || err}. Check that /public/uploads is writable.`,
-      500,
-    )
-  }
-
-  const url = `/uploads/${filename}`
   writeAudit(user, 'CREATE', 'UPLOAD', null, {
-    url,
+    url: `[data URL ${mime} ${buffer.length} bytes]`,
     mime,
     bytes: buffer.length,
     originalName,

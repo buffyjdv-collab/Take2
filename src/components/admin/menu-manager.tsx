@@ -863,9 +863,9 @@ function ImageUploader({
               </>
             )}
           </div>
-          {value && /^\/uploads\//i.test(value) && (
+          {value && /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(value) && (
             <p className="text-xs text-emerald-700">
-              ✓ Uploaded to {value}
+              ✓ Image uploaded successfully
             </p>
           )}
           {lastError && (

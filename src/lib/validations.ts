@@ -114,8 +114,7 @@ export const modifierGroupSchema = z.object({
 //   - empty string
 //   - null (coerced to '' — happens when loading an item with no image from DB)
 //   - a public URL (https://…)
-//   - a data URL (data:image/...;base64,…) uploaded via the menu editor
-//   - a server-relative path (/uploads/…) returned by /api/admin/upload
+//   - a data URL (data:image/...;base64,…) uploaded via /api/admin/upload
 export const menuItemImageSchema = z
   .union([z.string(), z.null()])
   .transform((v) => (v == null ? '' : v))
@@ -127,9 +126,8 @@ export const menuItemImageSchema = z
         (v) =>
           v === '' ||
           /^https?:\/\//i.test(v) ||
-          /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(v) ||
-          /^\/uploads\//i.test(v),
-        'Image must be a URL, a data URL, or an /uploads/ path',
+          /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(v),
+        'Image must be a URL or a data URL',
       ),
   )
   .optional()
