@@ -220,9 +220,67 @@ model Restaurant {
   invitations     TenantInvitation[]
   onboardedBy     User?       @relation("OnboardedBy", fields: [onboardedById], references: [id])
   platformFees    PlatformFee[]
+  paymentMethods  RestaurantPaymentMethod[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
+// RESTAURANT PAYMENT METHODS (Zepto-style configurable payment options)
+// ============================================================================
+// Each row = one payment option offered by a restaurant at checkout.
+// A restaurant can configure label, description, icon, accent color, priority,
+// and a JSON `config` blob for provider-specific settings (e.g. UPI VPA,
+// Razorpay key ID, etc.). The `type` field drives the customer-facing flow.
+//
+// Type values:
+//   UPI         → UPI deep-link + QR fallback
+//   QR          → Standalone QR (renders a QR for the configured payload)
+//   CARD        → Credit / Debit card (mock provider)
+//   WALLET      → Mobile wallet (PhonePe / Paytm / Mobikwik etc.)
+//   NETBANKING  → Net banking redirect (mock)
+//   CASH        → Pay cash to waiter / counter staff
+//   COUNTER     → Pay at counter (cash or card, in person)
+//   PAY_LATER   → Pay-later / Tab (post-paid, settled at end of meal)
+//   CUSTOM      → Restaurant-defined flow (renders as informational card)
+model RestaurantPaymentMethod {
+  id            String   @id @default(cuid())
+  restaurantId  String
+
+  // Canonical type — drives the customer-facing payment flow.
+  // See model comment above for the value set.
+  type          String
+
+  // Display label shown to customers (e.g. "UPI", "PhonePe", "Pay at counter")
+  label         String
+  // Short helper text shown under the label (e.g. "GPay / PhonePe / Paytm")
+  description   String?
+  // Lucide icon name (e.g. "Smartphone", "CreditCard", "Banknote", "Wallet",
+  // "Building", "QrCode", "Clock"). UI falls back to a default if missing.
+  icon          String?
+  // Tailwind-friendly hex color used for the icon chip (e.g. "#EA580C")
+  accentColor   String   @default("#64748B")
+
+  // Whether this method is shown to customers at checkout
+  active        Boolean  @default(true)
+  // Sort order — lower numbers appear first in the customer picker
+  priority      Int      @default(100)
+
+  // JSON blob with provider-specific config:
+  //   UPI  → { upiId: "restaurant@okhdfcbank" }
+  //   CARD → { provider: "RAZORPAY" | "STRIPE" | "MOCK",KeyId?: "...", keySecret?: "..." }
+  //   WALLET → { provider: "PHONEPE" | "PAYTM" | "MOBIKWIK" | "MOCK" }
+  //   QR → { payload: "upi://..." | override }
+  config        Json?
+
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([restaurantId])
+  @@index([restaurantId, active])
 }
 
 model Branch {

@@ -21,7 +21,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { VegBadge } from '@/components/restaurant/veg-badge'
 import type { OrderStatus } from '@/lib/types'
-import type { RestaurantInfo } from './types'
+import type { RestaurantInfo, PaymentMethodT } from './types'
+import { PaymentMethodPicker, filterAvailableForCheckout } from './payment-method-picker'
 
 const STEPS: { key: OrderStatus; label: string; sublabel: string; icon: any }[] = [
   { key: 'NEW', label: 'Order Placed', sublabel: 'Waiting for restaurant to accept', icon: CheckCircle2 },
@@ -125,19 +126,39 @@ export function OrderTracking({
     }
   }, [isServed, isPaid, orderId])
 
-  const handlePay = async (method: 'UPI' | 'WALLET') => {
+  const handlePay = async (method: PaymentMethodT) => {
     setPaying(true)
-    setPaymentMethod(method === 'UPI' ? 'UPI' : 'CASH')
+    setPaymentMethod(method.type as any)
     try {
-      const init = await initiate.mutateAsync({ orderId, method })
-      if (method === 'UPI') {
+      const t = method.type
+      // Cash / Counter / Pay-Later: no online payment initiated.
+      if (t === 'CASH' || t === 'COUNTER' || t === 'PAY_LATER') {
+        toast.info(
+          t === 'CASH'
+            ? 'Please hand the cash to your waiter.'
+            : t === 'COUNTER'
+              ? 'Please pay at the billing counter.'
+              : 'You can settle the bill before leaving.',
+          { description: 'Staff will mark your order as paid.', duration: 5000 },
+        )
+        setPaymentMethod(null)
+        return
+      }
+      const apiMethod = t === 'QR' ? 'UPI' : (t as any)
+      const init = await initiate.mutateAsync({
+        orderId,
+        method: apiMethod,
+        paymentMethodId: method.id,
+      })
+      if ((t === 'UPI' || t === 'QR') && init.upiDeepLink) {
         setUpiDeepLink(init.upiDeepLink || null)
         setUpiQrPayload(init.upiQrPayload || null)
-        if (init.upiDeepLink) {
-          window.location.href = init.upiDeepLink
-          return
-        }
       }
+      if (t === 'UPI' && init.upiDeepLink) {
+        window.location.href = init.upiDeepLink
+        return
+      }
+      toast.info('Connecting to payment gateway…')
       await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))
       await verify.mutateAsync({
         paymentId: init.paymentId,
@@ -154,27 +175,7 @@ export function OrderTracking({
     }
   }
 
-  const handleInlinePay = async (method: 'UPI' | 'WALLET') => {
-    setPaying(true)
-    try {
-      const init = await initiate.mutateAsync({ orderId, method })
-      if (method === 'UPI' && init.upiDeepLink) {
-        window.location.href = init.upiDeepLink
-        return
-      }
-      toast.info('Connecting to payment gateway…')
-      await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))
-      await verify.mutateAsync({
-        paymentId: init.paymentId,
-        providerTxnId: init.providerTxnId,
-      })
-      toast.success('Payment successful!')
-    } catch (err: any) {
-      toast.error(err.message || 'Payment failed')
-    } finally {
-      setPaying(false)
-    }
-  }
+  const handleInlinePay = async (method: PaymentMethodT) => handlePay(method)
 
   const copyUpiId = () => {
     if (upiId) {
@@ -379,60 +380,12 @@ export function OrderTracking({
             <span className="text-[13px] font-medium text-slate-600">Amount due</span>
             <span className="text-lg font-extrabold text-slate-900">{formatINR(order.grandTotal)}</span>
           </div>
-          <div className="flex flex-col gap-2">
-            {acceptUpi && upiId && (
-              <Button
-                variant="outline"
-                className="h-11 justify-start rounded-xl border-slate-200 bg-white pl-3 font-normal text-slate-700 hover:border-orange-300 hover:bg-orange-50/50"
-                disabled={paying}
-                onClick={() => handleInlinePay('UPI')}
-              >
-                <Smartphone className="mr-3 h-5 w-5 text-orange-600" />
-                <div className="flex-1 text-left">
-                  <p className="text-[13px] font-semibold text-slate-800">Pay by UPI</p>
-                  <p className="text-[11px] text-slate-400">Opens UPI app</p>
-                </div>
-                <ArrowRight className="h-4 w-4 text-slate-300" />
-              </Button>
-            )}
-            {acceptUpi && upiId && (
-              <Button
-                variant="outline"
-                className="h-11 justify-start rounded-xl border-slate-200 bg-white pl-3 font-normal text-slate-700 hover:border-purple-300 hover:bg-purple-50/50"
-                disabled={paying}
-                onClick={() => {
-                  setPaymentMethod('QR')
-                  handleInlinePay('UPI')
-                }}
-              >
-                <QrCode className="mr-3 h-5 w-5 text-purple-600" />
-                <div className="flex-1 text-left">
-                  <p className="text-[13px] font-semibold text-slate-800">Scan QR</p>
-                  <p className="text-[11px] text-slate-400">Scan with your UPI app</p>
-                </div>
-                <ArrowRight className="h-4 w-4 text-slate-300" />
-              </Button>
-            )}
-            {acceptCash && (
-              <Button
-                variant="outline"
-                className="h-11 justify-start rounded-xl border-slate-200 bg-white pl-3 font-normal text-slate-700 hover:border-green-300 hover:bg-green-50/50"
-                onClick={() => {
-                  toast.info('Please hand the cash to your waiter.', {
-                    description: 'They will mark your order as paid.',
-                    duration: 5000,
-                  })
-                }}
-              >
-                <Banknote className="mr-3 h-5 w-5 text-green-600" />
-                <div className="flex-1 text-left">
-                  <p className="text-[13px] font-semibold text-slate-800">Pay in cash</p>
-                  <p className="text-[11px] text-slate-400">Hand cash to your waiter</p>
-                </div>
-                <ArrowRight className="h-4 w-4 text-slate-300" />
-              </Button>
-            )}
-          </div>
+          <PaymentMethodPicker
+            methods={filterAvailableForCheckout(restaurant?.paymentMethods)}
+            onSelect={(m) => handleInlinePay(m)}
+            disabled={paying}
+            compact
+          />
           {paying && (
             <div className="mt-3 flex items-center justify-center gap-2 text-[13px] text-amber-700">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -560,67 +513,16 @@ export function OrderTracking({
               </div>
 
               <div className="space-y-2">
-                {acceptUpi && upiId && (
-                  <button
-                    onClick={() => handlePay('UPI')}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-slate-200 p-3.5 text-left transition-all hover:border-orange-300 hover:bg-orange-50/50"
-                  >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-50">
-                      <Smartphone className="h-5 w-5 text-orange-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-slate-800">Pay by UPI</p>
-                      <p className="text-[12px] text-slate-400">Opens your UPI app</p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-slate-300" />
-                  </button>
-                )}
-
-                {acceptUpi && upiId && (
-                  <button
-                    onClick={() => {
-                      setPaymentMethod('QR')
-                      handlePay('UPI')
-                    }}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-slate-200 p-3.5 text-left transition-all hover:border-purple-300 hover:bg-purple-50/50"
-                  >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-purple-50">
-                      <QrCode className="h-5 w-5 text-purple-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-slate-800">Scan QR code</p>
-                      <p className="text-[12px] text-slate-400">Scan with GPay / PhonePe / Paytm</p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-slate-300" />
-                  </button>
-                )}
-
-                {acceptCash && (
-                  <button
-                    onClick={() => {
-                      setPostPaymentPopupOpen(false)
-                      toast.info('Please hand the cash to your waiter.', {
-                        description: 'They will mark your order as paid.',
-                        duration: 5000,
-                      })
-                    }}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-slate-200 p-3.5 text-left transition-all hover:border-green-300 hover:bg-green-50/50"
-                  >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50">
-                      <Banknote className="h-5 w-5 text-green-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-slate-800">Pay in cash</p>
-                      <p className="text-[12px] text-slate-400">Hand cash to your waiter</p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-slate-300" />
-                  </button>
-                )}
+                <PaymentMethodPicker
+                  methods={filterAvailableForCheckout(restaurant?.paymentMethods)}
+                  onSelect={(m) => handlePay(m)}
+                  disabled={paying}
+                />
               </div>
 
-              {!upiId && (
+              {(!restaurant?.paymentMethods || restaurant.paymentMethods.length === 0) && (
                 <p className="text-center text-xs text-amber-600">
-                  UPI payment is not available for this restaurant. Please pay in cash.
+                  No payment methods configured for this restaurant. Please ask the staff.
                 </p>
               )}
 

@@ -70,6 +70,19 @@ export interface RestaurantInfo {
   acceptCounter: boolean
   upiId?: string | null
   settings?: any
+  /** Active payment-method rows, sorted by priority (Zepto-style). */
+  paymentMethods?: PaymentMethodT[]
+}
+
+export interface PaymentMethodT {
+  id: string
+  type: string
+  label: string
+  description?: string | null
+  icon?: string | null
+  accentColor: string
+  priority: number
+  config?: any
 }
 
 export interface TableInfo {

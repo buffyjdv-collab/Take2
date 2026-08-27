@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const [categories, items, modifierGroups] = await Promise.all([
+  const [categories, items, modifierGroups, paymentMethods] = await Promise.all([
     db.menuCategory.findMany({
       where: { restaurantId: restaurant.id, active: true },
       orderBy: { sortOrder: 'asc' },
@@ -54,6 +54,12 @@ export async function GET(req: NextRequest) {
       include: { modifiers: { orderBy: { sortOrder: 'asc' } } },
       orderBy: { sortOrder: 'asc' },
     }),
+    db.restaurantPaymentMethod
+      .findMany({
+        where: { restaurantId: restaurant.id, active: true },
+        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      })
+      .catch(() => []),
   ])
 
   return ok({
@@ -79,6 +85,16 @@ export async function GET(req: NextRequest) {
       acceptCounter: restaurant.acceptCounter,
       upiId: restaurant.upiId,
       settings: restaurant.settings,
+      paymentMethods: paymentMethods.map((m) => ({
+        id: m.id,
+        type: m.type,
+        label: m.label,
+        description: m.description,
+        icon: m.icon,
+        accentColor: m.accentColor,
+        priority: m.priority,
+        config: m.config,
+      })),
     },
     table: {
       id: table.id,

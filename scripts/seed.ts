@@ -13,6 +13,7 @@
  */
 import bcrypt from 'bcryptjs'
 import { db } from '../src/lib/db'
+import { defaultSeededPaymentMethods } from '../src/lib/payment-method-defaults'
 
 async function main() {
   console.log('🌱 Seeding Spice Garden restaurant...')
@@ -34,6 +35,7 @@ async function main() {
   await db.menuCategory.deleteMany()
   await db.table.deleteMany()
   await db.restaurantSettings.deleteMany()
+  await db.restaurantPaymentMethod.deleteMany()
   await db.branch.deleteMany()
   await db.session.deleteMany()
   await db.account.deleteMany()
@@ -103,6 +105,25 @@ async function main() {
       taxInclusive: false,
     },
   })
+
+  // ---------------------------------------------------- Restaurant Payment Methods
+  // Zepto-style: each row = one configurable payment option at checkout.
+  // Defaults: UPI (active, with VPA), Cash (active), Counter (active),
+  // Card / Wallet / Net Banking (seeded but inactive — flip on in Settings).
+  await db.restaurantPaymentMethod.createMany({
+    data: defaultSeededPaymentMethods(restaurant.upiId).map((m) => ({
+      restaurantId: restaurant.id,
+      type: m.type,
+      label: m.label,
+      description: m.description,
+      icon: m.icon,
+      accentColor: m.accentColor,
+      active: m.active,
+      priority: m.priority,
+      config: m.config as any,
+    })),
+  })
+  console.log('  ✓ Created 6 payment methods (3 active: UPI, Cash, Counter)')
 
   // -------------------------------------------------------------------- Users
   const passwordHash = await bcrypt.hash('password123', 10)

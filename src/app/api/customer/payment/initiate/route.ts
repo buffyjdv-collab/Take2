@@ -3,15 +3,24 @@ import { db } from '@/lib/db'
 import { fail, ok } from '@/lib/api-helpers'
 import { initiatePaymentSchema } from '@/lib/validations'
 import { buildUpiDeepLink, buildUpiQrPayload } from '@/lib/upi'
+import { toApiPaymentProvider } from '@/lib/payment-method-defaults'
 
 export const dynamic = 'force-dynamic'
 
-// POST /api/customer/payment/initiate
-// Body: { orderId, method: 'UPI' | 'CARD' | 'WALLET' }
-// For UPI method, also returns:
-//   - upiDeepLink: upi://pay?... URL that opens the customer's UPI app
-//   - upiQrPayload: the string to encode in a QR code (same as deep link)
-//   - upiId: the restaurant's UPI ID (VPA)
+/**
+ * POST /api/customer/payment/initiate
+ *
+ * Body: { orderId, method: PaymentMethodType, paymentMethodId? }
+ *
+ * For UPI / QR method, also returns:
+ *   - upiDeepLink: upi://pay?... URL that opens the customer's UPI app
+ *   - upiQrPayload: the string to encode in a QR code (same as deep link)
+ *   - upiId: the restaurant's UPI ID (VPA)
+ *
+ * For CARD / WALLET / NETBANKING / PAY_LATER / CUSTOM: returns a mock
+ * providerTxnId and verifyInMs (the customer "completes" the payment on
+ * the client side after a short delay).
+ */
 export async function POST(req: NextRequest) {
   let body: unknown
   try {
@@ -31,36 +40,59 @@ export async function POST(req: NextRequest) {
   })
   if (!order) return fail('Order not found.', 404)
 
-  // Method allowed by restaurant?
   const r = order.restaurant
-  if (input.method === 'UPI' && !r.acceptUpi)
-    return fail('UPI payments are not accepted.', 403)
-  if (input.method === 'CARD' && !r.acceptCard)
-    return fail('Card payments are not accepted.', 403)
-  // WALLET treated like UPI for acceptance
 
-  // For UPI method, require the restaurant to have a UPI ID configured
+  // Resolve the configured payment-method row (if the customer tapped a
+  // specific one). Falls back to the first active method of the same type.
+  let methodRow: Awaited<ReturnType<typeof db.restaurantPaymentMethod.findFirst>> = null
+  if (input.paymentMethodId) {
+    methodRow = await db.restaurantPaymentMethod.findFirst({
+      where: {
+        id: input.paymentMethodId,
+        restaurantId: r.id,
+        active: true,
+        type: input.method,
+      },
+    })
+    if (!methodRow) {
+      return fail('This payment method is no longer available. Please choose another.', 404)
+    }
+  } else {
+    methodRow = await db.restaurantPaymentMethod.findFirst({
+      where: { restaurantId: r.id, active: true, type: input.method },
+      orderBy: { priority: 'asc' },
+    })
+    // For CASH / COUNTER we don't actually initiate a payment online — those
+    // go through the admin "mark cash paid" flow. If the customer taps one
+    // here anyway, just return a friendly error.
+    if (!methodRow && (input.method === 'CASH' || input.method === 'COUNTER')) {
+      return fail(
+        'Cash / counter payments are handled by your waiter. Please let them know.',
+        400,
+      )
+    }
+    if (!methodRow) {
+      return fail('This payment method is not available for this restaurant.', 403)
+    }
+  }
+
+  // For UPI / QR: prefer the per-method `upiId` from config, fall back to the
+  // legacy Restaurant.upiId field.
+  const config = (methodRow.config as any) || {}
+  const upiId = config.upiId || r.upiId || null
+
   let upiDeepLink: string | undefined
   let upiQrPayload: string | undefined
-  if (input.method === 'UPI') {
-    if (!r.upiId) {
+
+  if (input.method === 'UPI' || input.method === 'QR') {
+    if (!upiId) {
       return fail(
         'This restaurant has not configured a UPI ID yet. Please choose another payment method or pay in cash.',
         400,
       )
     }
-    upiDeepLink = buildUpiDeepLink(
-      r.upiId,
-      order.grandTotal,
-      order.orderNumber,
-      r.name,
-    )
-    upiQrPayload = buildUpiQrPayload(
-      r.upiId,
-      order.grandTotal,
-      order.orderNumber,
-      r.name,
-    )
+    upiDeepLink = buildUpiDeepLink(upiId, order.grandTotal, order.orderNumber, r.name)
+    upiQrPayload = buildUpiQrPayload(upiId, order.grandTotal, order.orderNumber, r.name)
   }
 
   // Create payment record with status PROCESSING
@@ -76,13 +108,12 @@ export async function POST(req: NextRequest) {
       status: 'PROCESSING',
       amount: order.grandTotal,
       currency: r.currency,
-      provider: input.method === 'UPI' ? 'UPI' : 'MOCK',
+      provider: toApiPaymentProvider(input.method, methodRow.config as any),
       providerTxnId,
       idempotencyKey: `pay-${order.id}-${Date.now()}`,
     },
   })
 
-  // Update order payment status to PROCESSING + method
   await db.order.update({
     where: { id: order.id },
     data: {
@@ -97,14 +128,16 @@ export async function POST(req: NextRequest) {
     amount: order.grandTotal,
     currency: r.currency,
     method: input.method,
-    // For UPI: include deep link + QR payload + the VPA
+    paymentMethodId: methodRow.id,
+    paymentMethodLabel: methodRow.label,
+    // For UPI / QR: include deep link + QR payload + the VPA
     upiDeepLink,
     upiQrPayload,
-    upiId: r.upiId || undefined,
+    upiId: upiId || undefined,
     restaurantName: r.name,
     orderNumber: order.orderNumber,
-    // Mock: tell client to "verify" in 2 seconds (simulates the customer
-    // completing the payment in their UPI app)
+    // Mock: tell client to "verify" in 1.5 seconds (simulates the customer
+    // completing the payment in their UPI app / wallet / card gateway)
     verifyInMs: 1500,
   })
 }

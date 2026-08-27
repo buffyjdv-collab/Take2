@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Minus, Plus, Trash2, ShoppingBag, Smartphone, QrCode, Banknote, Loader2, CheckCircle2, Copy, ChevronRight, User, Phone } from 'lucide-react'
+import { PaymentMethodPicker, filterAvailableForCheckout } from './payment-method-picker'
+import type { PaymentMethodT } from './types'
 import { useCustomerCart, lineKeyOf } from '@/stores/customer-cart'
 import { Price } from '@/components/restaurant/price'
 import { VegBadge } from '@/components/restaurant/veg-badge'
@@ -37,7 +39,7 @@ interface Props {
   onCheckout: (orderId: string) => void
 }
 
-type PaymentMethod = 'UPI' | 'QR' | 'CASH' | null
+type PaymentMethod = 'UPI' | 'QR' | 'CASH' | 'CARD' | 'WALLET' | 'NETBANKING' | 'COUNTER' | 'PAY_LATER' | 'CUSTOM' | null
 
 export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props) {
   const items = useCustomerCart((s) => s.items)
@@ -88,7 +90,7 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
     }
   }, [confirmOpen, paymentStep])
 
-  const handlePlaceOrder = async (method: PaymentMethod) => {
+  const handlePlaceOrder = async (method: PaymentMethodT | null) => {
     setTouched(true)
     if (!formValid) {
       toast.error('Please enter your name and phone number to place the order.')
@@ -99,7 +101,8 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
       return
     }
 
-    setSelectedMethod(method)
+    const t = method.type as any
+    setSelectedMethod(t)
     setPaymentStep('processing')
 
     try {
@@ -128,10 +131,18 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
       sessionStorage.removeItem('last-idem-key')
       setPlacedOrderId(order.id)
 
-      if (method === 'CASH') {
+      // Cash / Counter / Pay-Later: no online payment initiated.
+      // Waiter / counter staff mark the order as paid later.
+      if (t === 'CASH' || t === 'COUNTER' || t === 'PAY_LATER') {
         setPaymentStep('done')
-        toast.success('Order placed! Please hand the cash to your waiter.', {
-          description: 'Your order will be confirmed once the waiter marks it as paid.',
+        const msg =
+          t === 'CASH'
+            ? 'Order placed! Please hand the cash to your waiter.'
+            : t === 'COUNTER'
+              ? 'Order placed! Please pay at the billing counter.'
+              : 'Order placed! You can settle the bill before leaving.'
+        toast.success(msg, {
+          description: 'Your order will be confirmed once staff marks it as paid.',
           duration: 6000,
         })
         setTimeout(() => {
@@ -142,14 +153,22 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
           setConfirmOpen(false)
           onCheckout(order.id)
         }, 2500)
-      } else if (method === 'UPI' || method === 'QR') {
+      } else if (t === 'UPI' || t === 'QR' || t === 'CARD' || t === 'WALLET' || t === 'NETBANKING' || t === 'CUSTOM') {
         try {
-          const init = await initiate.mutateAsync({ orderId: order.id, method: 'UPI' })
+          // UPI/QR go through the UPI deep-link flow; everything else (CARD /
+          // WALLET / NETBANKING / CUSTOM) goes through the mock verify flow.
+          const apiMethod = t === 'QR' ? 'UPI' : t
+          const init = await initiate.mutateAsync({
+            orderId: order.id,
+            method: apiMethod as any,
+            paymentMethodId: method.id,
+          })
           setUpiDeepLink(init.upiDeepLink || null)
           setUpiQrPayload(init.upiQrPayload || null)
           setUpiId(init.upiId || null)
 
-          if (method === 'UPI' && init.upiDeepLink) {
+          // UPI method (deep-link): try to open the customer's UPI app.
+          if (t === 'UPI' && init.upiDeepLink) {
             const tableToken = new URLSearchParams(window.location.search).get('table') || ''
             sessionStorage.setItem(`order-${tableToken}`, order.id)
             sessionStorage.setItem('returning-from-upi', '1')
@@ -163,6 +182,8 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
             return
           }
 
+          // For QR / CARD / WALLET / NETBANKING / CUSTOM: wait briefly
+          // then mark the payment as verified (mock).
           await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))
           await verify.mutateAsync({
             paymentId: init.paymentId,
@@ -496,7 +517,7 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
 
               <Separator />
 
-              {/* Payment method selection */}
+              {/* Payment method selection — Zepto-style configurable picker */}
               <div className="space-y-3">
                 <Label className="text-[13px] font-semibold text-slate-700">
                   {requirePrePayment ? 'Choose payment method *' : 'Pay now (optional)'}
@@ -506,65 +527,18 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
                     You can pay now or after your order is served.
                   </p>
                 )}
-                <div className="space-y-2.5">
-                  {/* UPI */}
-                  <button
-                    onClick={() => handlePlaceOrder('UPI')}
-                    disabled={paymentStep === 'processing' || !formValid || !restaurant.upiId}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-slate-200 p-3.5 text-left transition-all hover:border-orange-300 hover:bg-orange-50/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-50">
-                      <Smartphone className="h-5 w-5 text-orange-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-slate-800">Pay by UPI</p>
-                      <p className="text-[12px] text-slate-400">
-                        {restaurant.upiId
-                          ? `Pay to ${restaurant.upiId}`
-                          : 'Not configured — choose another method'}
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-slate-300" />
-                  </button>
-
-                  {/* Scan QR */}
-                  <button
-                    onClick={() => handlePlaceOrder('QR')}
-                    disabled={paymentStep === 'processing' || !formValid || !restaurant.upiId}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-slate-200 p-3.5 text-left transition-all hover:border-purple-300 hover:bg-purple-50/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-purple-50">
-                      <QrCode className="h-5 w-5 text-purple-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-slate-800">Scan QR code</p>
-                      <p className="text-[12px] text-slate-400">
-                        {restaurant.upiId
-                          ? 'Scan with GPay / PhonePe / Paytm'
-                          : 'Not configured — choose another method'}
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-slate-300" />
-                  </button>
-
-                  {/* Cash */}
-                  <button
-                    onClick={() => handlePlaceOrder('CASH')}
-                    disabled={paymentStep === 'processing' || !formValid}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-slate-200 p-3.5 text-left transition-all hover:border-green-300 hover:bg-green-50/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50">
-                      <Banknote className="h-5 w-5 text-green-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-slate-800">Pay in cash</p>
-                      <p className="text-[12px] text-slate-400">
-                        Hand cash to your waiter — they&apos;ll mark it paid
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-slate-300" />
-                  </button>
-                </div>
+                <PaymentMethodPicker
+                  methods={filterAvailableForCheckout(restaurant.paymentMethods)}
+                  onSelect={(m) => handlePlaceOrder(m)}
+                  disabled={paymentStep === 'processing' || !formValid}
+                  recommendFirst
+                />
+                {(!restaurant.paymentMethods ||
+                  restaurant.paymentMethods.length === 0) && (
+                  <p className="text-[11px] text-slate-400">
+                    No payment methods configured yet — please ask the staff for assistance.
+                  </p>
+                )}
               </div>
             </div>
           )}

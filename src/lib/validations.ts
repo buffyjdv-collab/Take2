@@ -44,14 +44,82 @@ export const createServiceRequestSchema = z.object({
 })
 
 // Payment initiation
+// `method` can be any of the RestaurantPaymentMethod.type values, plus
+// 'CASH' / 'COUNTER' for the legacy waiter-mark-paid flow.
 export const initiatePaymentSchema = z.object({
   orderId: z.string().min(1),
-  method: z.enum(['UPI', 'CARD', 'WALLET']),
+  method: z.enum([
+    'UPI',
+    'QR',
+    'CARD',
+    'WALLET',
+    'NETBANKING',
+    'CASH',
+    'COUNTER',
+    'PAY_LATER',
+    'CUSTOM',
+  ]),
+  // Optional: id of the RestaurantPaymentMethod the customer tapped.
+  // Lets the initiate route read the per-method config (UPI ID, provider etc.)
+  paymentMethodId: z.string().optional(),
 })
 
 export const verifyPaymentSchema = z.object({
   paymentId: z.string().min(1),
   providerTxnId: z.string().min(1),
+})
+
+// ============================================================================
+// RESTAURANT PAYMENT METHODS — ZEPTO-STYLE CONFIGURABLE PAYMENT TYPES
+// ============================================================================
+export const PAYMENT_METHOD_TYPES = [
+  'UPI',
+  'QR',
+  'CARD',
+  'WALLET',
+  'NETBANKING',
+  'CASH',
+  'COUNTER',
+  'PAY_LATER',
+  'CUSTOM',
+] as const
+
+// Create a new payment method for a restaurant
+export const createPaymentMethodSchema = z.object({
+  type: z.enum(PAYMENT_METHOD_TYPES),
+  label: z.string().min(1, 'Label is required').max(60),
+  description: z.string().max(180).optional().nullable(),
+  icon: z.string().max(60).optional().nullable(),
+  accentColor: z
+    .string()
+    .max(9)
+    .regex(/^#[0-9a-fA-F]{3,8}$/, 'Accent color must be a hex color (e.g. #EA580C)')
+    .optional()
+    .nullable(),
+  active: z.boolean().optional(),
+  priority: z.number().int().min(0).max(9999).optional(),
+  config: z.record(z.string(), z.any()).optional().nullable(),
+})
+
+// Update an existing payment method
+export const updatePaymentMethodSchema = z.object({
+  label: z.string().min(1).max(60).optional(),
+  description: z.string().max(180).optional().nullable(),
+  icon: z.string().max(60).optional().nullable(),
+  accentColor: z
+    .string()
+    .max(9)
+    .regex(/^#[0-9a-fA-F]{3,8}$/, 'Accent color must be a hex color')
+    .optional()
+    .nullable(),
+  active: z.boolean().optional(),
+  priority: z.number().int().min(0).max(9999).optional(),
+  config: z.record(z.string(), z.any()).optional().nullable(),
+})
+
+// Reorder payment methods (batch update priorities)
+export const reorderPaymentMethodsSchema = z.object({
+  orderedIds: z.array(z.string().min(1)).min(1).max(100),
 })
 
 // Admin: order status update

@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { LoadingSpinner, ButtonWithLoading, EmptyState } from '@/components/restaurant/loading-states'
 import { toast } from 'sonner'
 import { useSession } from 'next-auth/react'
+import { PaymentMethodsManager } from './payment-methods-manager'
 
 export function SettingsManager() {
   const { data: session } = useSession()
@@ -196,46 +197,8 @@ export function SettingsManager() {
         </TabsContent>
 
         <TabsContent value="payments">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Accepted payment methods</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <ToggleRow label="UPI" checked={form.acceptUpi} onChange={(v) => set({ acceptUpi: v })} />
-              <ToggleRow label="Card" checked={form.acceptCard} onChange={(v) => set({ acceptCard: v })} />
-              <ToggleRow label="Cash" checked={form.acceptCash} onChange={(v) => set({ acceptCash: v })} />
-              <ToggleRow label="Pay at counter" checked={form.acceptCounter} onChange={(v) => set({ acceptCounter: v })} />
-            </CardContent>
-          </Card>
-
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle className="text-base">UPI ID for receiving payments</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Enter your restaurant&apos;s UPI ID (VPA). Customers will see this
-                when paying by UPI, and a QR code will be generated automatically.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Field label="UPI ID (e.g. restaurant@okhdfcbank)">
-                <Input
-                  value={form.upiId || ''}
-                  onChange={(e) => set({ upiId: e.target.value })}
-                  placeholder="restaurant@okhdfcbank"
-                />
-              </Field>
-              {form.upiId && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                  ✓ Customers paying by UPI will see &ldquo;{form.upiId}&rdquo;
-                  and can pay via a deep link or by scanning the QR code.
-                </div>
-              )}
-              {!form.upiId && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  ⚠ No UPI ID set. UPI / Scan QR payment options won&apos;t work
-                  for customers until you add one.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* NEW: Zepto-style Payment Methods Manager */}
+          <PaymentMethodsManager restaurantId={effectiveId || undefined} />
 
           <Card className="mt-4">
             <CardHeader>

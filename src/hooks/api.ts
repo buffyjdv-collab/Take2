@@ -114,7 +114,20 @@ export function useCreateServiceRequest() {
 
 export function useInitiatePayment() {
   return useMutation({
-    mutationFn: (body: { orderId: string; method: 'UPI' | 'CARD' | 'WALLET' }) =>
+    mutationFn: (body: {
+      orderId: string
+      method:
+        | 'UPI'
+        | 'QR'
+        | 'CARD'
+        | 'WALLET'
+        | 'NETBANKING'
+        | 'CASH'
+        | 'COUNTER'
+        | 'PAY_LATER'
+        | 'CUSTOM'
+      paymentMethodId?: string
+    }) =>
       api<any>('/api/customer/payment/initiate', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -276,6 +289,74 @@ export function useAdminSettings(restaurantId?: string) {
   return useQuery({
     queryKey: ['admin-settings', restaurantId],
     queryFn: () => api<any>(`/api/admin/settings${qs}`),
+  })
+}
+
+// ---------------- Payment Methods (Zepto-style) ----------------
+
+export function usePaymentMethods(restaurantId?: string) {
+  const qs = restaurantId ? `?restaurantId=${restaurantId}` : ''
+  return useQuery<{ methods: any[]; presets: any[] }>({
+    queryKey: ['admin-payment-methods', restaurantId],
+    queryFn: () => api(`/api/admin/payment-methods${qs}`),
+  })
+}
+
+export function useCreatePaymentMethod(restaurantId?: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: any) =>
+      api<any>(`/api/admin/payment-methods${restaurantId ? `?restaurantId=${restaurantId}` : ''}`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-payment-methods'] })
+      qc.invalidateQueries({ queryKey: ['admin-settings'] })
+    },
+  })
+}
+
+export function useUpdatePaymentMethod(restaurantId?: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string } & Record<string, unknown>) =>
+      api<any>(`/api/admin/payment-methods/${id}${restaurantId ? `?restaurantId=${restaurantId}` : ''}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-payment-methods'] })
+      qc.invalidateQueries({ queryKey: ['admin-settings'] })
+    },
+  })
+}
+
+export function useDeletePaymentMethod(restaurantId?: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      api<any>(`/api/admin/payment-methods/${id}${restaurantId ? `?restaurantId=${restaurantId}` : ''}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-payment-methods'] })
+      qc.invalidateQueries({ queryKey: ['admin-settings'] })
+    },
+  })
+}
+
+export function useReorderPaymentMethods(restaurantId?: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      api<any>(`/api/admin/payment-methods/reorder${restaurantId ? `?restaurantId=${restaurantId}` : ''}`, {
+        method: 'POST',
+        body: JSON.stringify({ orderedIds }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-payment-methods'] })
+    },
   })
 }
 
