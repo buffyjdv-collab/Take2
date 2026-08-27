@@ -318,11 +318,6 @@ export const settingsSchema = z.object({
       allowRequestBill: z.boolean().optional(),
       maxItemsPerOrder: z.number().int().min(1).max(200).optional(),
       taxInclusive: z.boolean().optional(),
-      // Payment timing controls (super admin / owner toggle)
-      allowPrePayment: z.boolean().optional(),
-      allowPostPayment: z.boolean().optional(),
-      requirePrePayment: z.boolean().optional(),
-      requirePostPayment: z.boolean().optional(),
     })
     .optional(),
 })

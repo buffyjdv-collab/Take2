@@ -237,16 +237,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Decide whether the restaurant should auto-request payment upfront.
-  // requirePrePayment (settings) → customer must pay BEFORE the order is accepted.
-  // In that case the order is created with status = 'PENDING_PAYMENT' so it is
-  // hidden from the kitchen/orders module until the customer pays. Once payment
-  // is confirmed (via /api/customer/payment/verify or mark-as-cash), the order
-  // transitions to 'NEW' and becomes visible for acceptance.
-  const settings = restaurant.settings
-  const shouldRequirePrePayment =
-    !!settings?.allowPrePayment && !!settings?.requirePrePayment
-  const initialStatus = shouldRequirePrePayment ? 'PENDING_PAYMENT' : 'NEW'
+  // Decide the initial status for the new order.
+  // The old auto-pre-payment-timing logic was removed — every new order now
+  // starts as 'NEW'. Staff can still manually request payment at any point
+  // via /api/admin/orders/[id]/request-payment (which sets the
+  // `prePaymentRequested` / `postPaymentRequested` flags the customer UI
+  // reads to show a "Please pay" prompt).
+  const initialStatus = 'NEW'
 
   // Create order + items + modifiers + update table — in a transaction
   const created = await db.$transaction(async (tx) => {
@@ -265,10 +262,10 @@ export async function POST(req: NextRequest) {
         paymentStatus: 'PENDING',
         notes: input.notes || null,
         idempotencyKey: input.idempotencyKey,
-        // If the restaurant has requirePrePayment enabled, flag the order so
-        // the customer UI prompts for payment immediately.
-        prePaymentRequested: shouldRequirePrePayment,
-        prePaymentRequestedAt: shouldRequirePrePayment ? new Date() : null,
+        // Pre/post payment flags are set ONLY when staff manually requests
+        // payment via /api/admin/orders/[id]/request-payment.
+        prePaymentRequested: false,
+        prePaymentRequestedAt: null,
         subtotal,
         taxAmount,
         serviceCharge,
@@ -341,17 +338,18 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Auto-accept if configured (but only after pre-payment is settled, if required)
-    if (restaurant.settings?.autoAcceptOrders && !shouldRequirePrePayment) {
+    // Auto-accept if configured (no longer gated by pre-payment — orders always
+    // start as 'NEW' now, so this transitions them straight to ACCEPTED when
+    // the restaurant has auto-accept turned on in Settings)
+    if (restaurant.settings?.autoAcceptOrders) {
       await tx.order.update({
         where: { id: order.id },
         data: { status: 'ACCEPTED', acceptedAt: new Date() },
       })
     }
 
-    // Notification row for kitchen (skip when pre-payment is required — kitchen
-    // shouldn't start cooking until the customer pays and the order is accepted)
-    if (!shouldRequirePrePayment && restaurant.settings?.notifyKitchenOnNewOrder !== false) {
+    // Notification row for kitchen
+    if (restaurant.settings?.notifyKitchenOnNewOrder !== false) {
       await tx.notification.create({
         data: {
           restaurantId: restaurant.id,
@@ -359,22 +357,6 @@ export async function POST(req: NextRequest) {
           type: 'NEW_ORDER',
           title: `New order ${order.orderNumber}`,
           message: `Table ${table.number} • ${lineItems.length} item(s) • ₹${grandTotal.toFixed(0)}`,
-          orderId: order.id,
-          tableId: table.id,
-        },
-      })
-    }
-
-    // If pre-payment is required, send a customer-facing notification so the
-    // customer's tracking UI knows to prompt for payment.
-    if (shouldRequirePrePayment) {
-      await tx.notification.create({
-        data: {
-          restaurantId: restaurant.id,
-          target: 'CUSTOMER',
-          type: 'PAYMENT_REQUIRED',
-          title: `Payment required for ${order.orderNumber}`,
-          message: `Please pay ₹${grandTotal.toFixed(0)} before we accept your order.`,
           orderId: order.id,
           tableId: table.id,
         },

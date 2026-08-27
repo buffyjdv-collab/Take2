@@ -1,28 +1,22 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useCustomerOrder, useCancelOrder, useInitiatePayment, useVerifyPayment } from '@/hooks/api'
+import { useCustomerOrder, useCancelOrder } from '@/hooks/api'
 import { useSocketEvent } from '@/hooks/use-socket'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { OrderStatusBadge } from '@/components/restaurant/order-status-badge'
 import { PaymentStatusBadge } from '@/components/restaurant/payment-status-badge'
 import { LoadingSpinner, EmptyState } from '@/components/restaurant/loading-states'
 import { formatINR } from '@/components/restaurant/price'
-import { BellRing, CheckCircle2, Clock, ChefHat, PackageCheck, Utensils, XCircle, CreditCard, Loader2, Smartphone, QrCode, Banknote, Copy, MapPin, ArrowRight } from 'lucide-react'
+import { BellRing, CheckCircle2, Clock, ChefHat, PackageCheck, Utensils, XCircle, CreditCard, ArrowRight, Smartphone, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { VegBadge } from '@/components/restaurant/veg-badge'
 import type { OrderStatus } from '@/lib/types'
-import type { RestaurantInfo, PaymentMethodT } from './types'
-import { PaymentMethodPicker, filterAvailableForCheckout } from './payment-method-picker'
+import type { RestaurantInfo } from './types'
+import { CheckoutSheet } from './checkout-sheet'
 
 const STEPS: { key: OrderStatus; label: string; sublabel: string; icon: any }[] = [
   { key: 'NEW', label: 'Order Placed', sublabel: 'Waiting for restaurant to accept', icon: CheckCircle2 },
@@ -53,9 +47,8 @@ export function OrderTracking({
   const qc = useQueryClient()
   const { data: order, isLoading } = useCustomerOrder(orderId)
   const cancel = useCancelOrder()
-  const initiate = useInitiatePayment()
-  const verify = useVerifyPayment()
-  const [paying, setPaying] = useState(false)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [postPayPrompted, setPostPayPrompted] = useState(false)
 
   useSocketEvent('order:updated', (payload: any) => {
     if (payload?.orderId === orderId) {
@@ -88,7 +81,7 @@ export function OrderTracking({
     return (
       <div className="flex min-h-[60vh] items-center justify-center bg-white">
         <div className="text-center">
-          <Loader2 className="mx-auto h-8 w-8 animate-spin text-orange-500" />
+          <LoadingSpinner size="lg" />
           <p className="mt-3 text-sm text-slate-400">Loading your order…</p>
         </div>
       </div>
@@ -106,83 +99,21 @@ export function OrderTracking({
   const needsToPay =
     !isPaid &&
     (isPendingPayment || order.prePaymentRequested || order.postPaymentRequested)
-  const acceptUpi = restaurant?.acceptUpi ?? true
-  const acceptCash = restaurant?.acceptCash ?? true
-  const upiId = restaurant?.upiId || null
 
-  const [postPaymentPopupOpen, setPostPaymentPopupOpen] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'QR' | 'CASH' | null>(null)
-  const [upiDeepLink, setUpiDeepLink] = useState<string | null>(null)
-  const [upiQrPayload, setUpiQrPayload] = useState<string | null>(null)
-
+  // Auto-open the checkout sheet once when the order transitions to SERVED
+  // and payment hasn't been collected yet (Zepto-style auto-prompt).
   useEffect(() => {
     if (
       isServed &&
       !isPaid &&
+      !postPayPrompted &&
       !sessionStorage.getItem(`postpay-popup-${orderId}`)
     ) {
-      setPostPaymentPopupOpen(true)
+      setCheckoutOpen(true)
       sessionStorage.setItem(`postpay-popup-${orderId}`, 'shown')
+      setPostPayPrompted(true)
     }
-  }, [isServed, isPaid, orderId])
-
-  const handlePay = async (method: PaymentMethodT) => {
-    setPaying(true)
-    setPaymentMethod(method.type as any)
-    try {
-      const t = method.type
-      // Cash / Counter / Pay-Later: no online payment initiated.
-      if (t === 'CASH' || t === 'COUNTER' || t === 'PAY_LATER') {
-        toast.info(
-          t === 'CASH'
-            ? 'Please hand the cash to your waiter.'
-            : t === 'COUNTER'
-              ? 'Please pay at the billing counter.'
-              : 'You can settle the bill before leaving.',
-          { description: 'Staff will mark your order as paid.', duration: 5000 },
-        )
-        setPaymentMethod(null)
-        return
-      }
-      const apiMethod = t === 'QR' ? 'UPI' : (t as any)
-      const init = await initiate.mutateAsync({
-        orderId,
-        method: apiMethod,
-        paymentMethodId: method.id,
-      })
-      if ((t === 'UPI' || t === 'QR') && init.upiDeepLink) {
-        setUpiDeepLink(init.upiDeepLink || null)
-        setUpiQrPayload(init.upiQrPayload || null)
-      }
-      if (t === 'UPI' && init.upiDeepLink) {
-        window.location.href = init.upiDeepLink
-        return
-      }
-      toast.info('Connecting to payment gateway…')
-      await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))
-      await verify.mutateAsync({
-        paymentId: init.paymentId,
-        providerTxnId: init.providerTxnId,
-      })
-      toast.success('Payment successful!')
-      setPostPaymentPopupOpen(false)
-      setPaymentMethod(null)
-    } catch (err: any) {
-      toast.error(err.message || 'Payment failed')
-      setPaymentMethod(null)
-    } finally {
-      setPaying(false)
-    }
-  }
-
-  const handleInlinePay = async (method: PaymentMethodT) => handlePay(method)
-
-  const copyUpiId = () => {
-    if (upiId) {
-      navigator.clipboard.writeText(upiId)
-      toast.success('UPI ID copied')
-    }
-  }
+  }, [isServed, isPaid, orderId, postPayPrompted])
 
   // Estimate minutes remaining
   const estMinutes = (() => {
@@ -355,52 +286,41 @@ export function OrderTracking({
         </div>
       </motion.div>
 
-      {/* Payment-requested panel */}
+      {/* Payment-requested panel — Zepto-style CTA card that opens the checkout sheet */}
       {needsToPay && (
         <motion.div
           initial={{ y: 8, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="mb-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4 shadow-sm"
+          className="mb-4 overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 shadow-sm"
         >
-          <div className="mb-3 flex items-center gap-2">
-            <CreditCard className="h-5 w-5 text-amber-600" />
-            <h3 className="text-[14px] font-bold text-amber-900">
+          <div className="p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-amber-600" />
+              <h3 className="text-[14px] font-bold text-amber-900">
+                {isPendingPayment || order.prePaymentRequested
+                  ? 'Please pay before we accept'
+                  : 'Settle your bill'}
+              </h3>
+            </div>
+            <p className="mb-3 text-[13px] text-amber-700/80">
               {isPendingPayment || order.prePaymentRequested
-                ? 'Please pay before we accept'
-                : 'Settle your bill'}
-            </h3>
-          </div>
-          <p className="mb-3 text-[13px] text-amber-700/80">
-            {isPendingPayment || order.prePaymentRequested
-              ? 'This restaurant requires upfront payment. Your order goes to the kitchen once confirmed.'
-              : 'Please settle the bill before leaving.'}
-          </p>
-          <div className="mb-3 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm">
-            <span className="text-[13px] font-medium text-slate-600">Amount due</span>
-            <span className="text-lg font-extrabold text-slate-900">{formatINR(order.grandTotal)}</span>
-          </div>
-          <PaymentMethodPicker
-            methods={filterAvailableForCheckout(restaurant?.paymentMethods)}
-            onSelect={(m) => handleInlinePay(m)}
-            disabled={paying}
-            compact
-          />
-          {paying && (
-            <div className="mt-3 flex items-center justify-center gap-2 text-[13px] text-amber-700">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Processing payment…
+                ? 'Your order goes to the kitchen once the payment is confirmed.'
+                : 'Please settle the bill before leaving.'}
+            </p>
+            <div className="mb-3 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm">
+              <span className="text-[13px] font-medium text-slate-600">Amount due</span>
+              <span className="text-lg font-extrabold text-slate-900">{formatINR(order.grandTotal)}</span>
             </div>
-          )}
-          {upiId && (
-            <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-slate-400">
-              <span>UPI ID:</span>
-              <code className="font-mono text-slate-600">{upiId}</code>
-              <button onClick={copyUpiId} className="text-orange-500 hover:underline">
-                <Copy className="h-3 w-3" />
-              </button>
-            </div>
-          )}
+            <Button
+              size="lg"
+              className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/25 transition-all hover:bg-orange-700 active:scale-[0.99]"
+              onClick={() => setCheckoutOpen(true)}
+            >
+              <CreditCard className="mr-2 h-4 w-4" />
+              Pay {formatINR(order.grandTotal)}
+            </Button>
+          </div>
         </motion.div>
       )}
 
@@ -459,85 +379,28 @@ export function OrderTracking({
         </Button>
       </div>
 
-      {/* Post-payment popup */}
-      <Dialog open={postPaymentPopupOpen} onOpenChange={(o) => { if (!paying) setPostPaymentPopupOpen(o) }}>
-        <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Utensils className="h-5 w-5 text-orange-600" />
-              Enjoy your meal!
-            </DialogTitle>
-          </DialogHeader>
-
-          {paying ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              {paymentMethod === 'QR' && upiQrPayload ? (
-                <>
-                  <p className="text-sm text-slate-500">
-                    Scan this QR code to pay
-                    <strong className="text-slate-900"> {formatINR(order.grandTotal)}</strong>
-                  </p>
-                  <div className="rounded-2xl border-2 border-slate-100 bg-white p-5">
-                    <QrCodeDisplay payload={upiQrPayload} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
-                  <p className="text-sm text-slate-500">
-                    {paymentMethod === 'UPI'
-                      ? 'Your UPI app should have opened. Waiting for payment…'
-                      : 'Processing…'}
-                  </p>
-                </>
-              )}
-              {upiId && (
-                <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
-                  <span className="text-slate-400">UPI ID:</span>
-                  <code className="font-mono text-slate-600">{upiId}</code>
-                  <button onClick={copyUpiId} className="text-orange-500 hover:underline">
-                    <Copy className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-500">
-                Your order has been served. Settle the bill using one of the methods below.
-              </p>
-
-              <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
-                <span className="text-sm font-medium text-slate-600">Amount due</span>
-                <span className="text-lg font-extrabold text-slate-900">{formatINR(order.grandTotal)}</span>
-              </div>
-
-              <div className="space-y-2">
-                <PaymentMethodPicker
-                  methods={filterAvailableForCheckout(restaurant?.paymentMethods)}
-                  onSelect={(m) => handlePay(m)}
-                  disabled={paying}
-                />
-              </div>
-
-              {(!restaurant?.paymentMethods || restaurant.paymentMethods.length === 0) && (
-                <p className="text-center text-xs text-amber-600">
-                  No payment methods configured for this restaurant. Please ask the staff.
-                </p>
-              )}
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full text-slate-400"
-                onClick={() => setPostPaymentPopupOpen(false)}
-              >
-                I&apos;ll pay later
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Zepto-style Checkout Sheet — replaces the old post-payment popup + inline picker.
+          Opens automatically when order is SERVED (once per order), and any time the
+          staff manually requests payment via /api/admin/orders/[id]/request-payment. */}
+      <CheckoutSheet
+        open={checkoutOpen}
+        onOpenChange={setCheckoutOpen}
+        restaurant={restaurant as RestaurantInfo}
+        totals={{
+          itemCount: order.items?.length || 0,
+          subtotal: order.subtotal,
+          taxAmount: order.taxAmount,
+          serviceCharge: order.serviceCharge,
+          grandTotal: order.grandTotal,
+        }}
+        items={[]}
+        existingOrderId={order.id}
+        skipCustomerDetails
+        onCheckoutComplete={() => {
+          setCheckoutOpen(false)
+          qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+        }}
+      />
     </div>
   )
 }
@@ -549,40 +412,4 @@ function BillRow({ label, value }: { label: string; value: number }) {
       <span>{formatINR(value)}</span>
     </div>
   )
-}
-
-function QrCodeDisplay({ payload }: { payload: string }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    import('qrcode').then((QRCode) => {
-      QRCode.toDataURL(payload, {
-        width: 256,
-        margin: 1,
-        color: { dark: '#0f172a', light: '#ffffff' },
-      })
-        .then((url: string) => { if (!cancelled) setDataUrl(url) })
-        .catch(() => { if (!cancelled) setError(true) })
-    }).catch(() => { if (!cancelled) setError(true) })
-    return () => { cancelled = true }
-  }, [payload])
-
-  if (error) {
-    return (
-      <div className="flex h-48 w-48 items-center justify-center text-center text-xs text-red-500">
-        Failed to generate QR code.
-        <br />Please use the UPI ID directly.
-      </div>
-    )
-  }
-  if (!dataUrl) {
-    return (
-      <div className="flex h-48 w-48 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-      </div>
-    )
-  }
-  return <img src={dataUrl} alt="UPI payment QR code" className="h-48 w-48" />
 }

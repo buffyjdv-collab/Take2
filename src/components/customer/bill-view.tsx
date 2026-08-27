@@ -1,17 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { useCustomerOrder, useInitiatePayment, useVerifyPayment, api } from '@/hooks/api'
+import { useCustomerOrder, api } from '@/hooks/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LoadingSpinner } from '@/components/restaurant/loading-states'
 import { Price, formatINR } from '@/components/restaurant/price'
 import { PaymentStatusBadge } from '@/components/restaurant/payment-status-badge'
-import { CheckCircle2, Loader2 } from 'lucide-react'
+import { CheckCircle2, CreditCard } from 'lucide-react'
 import { toast } from 'sonner'
 import { motion } from 'framer-motion'
-import type { RestaurantInfo, PaymentMethodT } from './types'
-import { PaymentMethodPicker, filterAvailableForCheckout } from './payment-method-picker'
+import { useQueryClient } from '@tanstack/react-query'
+import type { RestaurantInfo } from './types'
+import { CheckoutSheet } from './checkout-sheet'
 
 export function BillView({
   orderId,
@@ -22,10 +23,9 @@ export function BillView({
   restaurant: RestaurantInfo
   onBackToMenu: () => void
 }) {
+  const qc = useQueryClient()
   const { data: order, isLoading } = useCustomerOrder(orderId)
-  const initiate = useInitiatePayment()
-  const verify = useVerifyPayment()
-  const [paying, setPaying] = useState(false)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
 
   if (isLoading || !order) {
     return (
@@ -37,42 +37,6 @@ export function BillView({
 
   const invoice = order.invoices?.[0]
   const isPaid = order.paymentStatus === 'PAID'
-
-  const handlePay = async (method: PaymentMethodT) => {
-    const t = method.type
-    setPaying(true)
-    try {
-      // Cash / Counter / Pay-Later: tell the customer to settle in person.
-      if (t === 'CASH' || t === 'COUNTER' || t === 'PAY_LATER') {
-        toast.info(
-          t === 'CASH'
-            ? 'Please hand the cash to your waiter.'
-            : t === 'COUNTER'
-              ? 'Please pay at the billing counter.'
-              : 'You can settle the bill before leaving.',
-          { description: 'Staff will mark your order as paid.', duration: 5000 },
-        )
-        return
-      }
-      const apiMethod = t === 'QR' ? 'UPI' : (t as any)
-      const init = await initiate.mutateAsync({
-        orderId,
-        method: apiMethod,
-        paymentMethodId: method.id,
-      })
-      toast.info('Connecting to payment gateway…')
-      await new Promise((r) => setTimeout(r, init.verifyInMs || 1500))
-      await verify.mutateAsync({
-        paymentId: init.paymentId,
-        providerTxnId: init.providerTxnId,
-      })
-      toast.success('Payment successful! 🎉')
-    } catch (err: any) {
-      toast.error(err.message || 'Payment failed')
-    } finally {
-      setPaying(false)
-    }
-  }
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
@@ -193,27 +157,55 @@ export function BillView({
         ) : (
           <>
             <h2 className="mb-3 text-sm font-semibold text-slate-900">
-              Choose payment method
+              Settle your bill
             </h2>
-            <PaymentMethodPicker
-              methods={filterAvailableForCheckout(restaurant.paymentMethods)}
-              onSelect={(m) => handlePay(m)}
-              disabled={paying}
-            />
-            {(!restaurant.paymentMethods || restaurant.paymentMethods.length === 0) && (
-              <p className="mt-3 text-center text-xs text-amber-600">
-                No payment methods configured. Please ask the staff.
-              </p>
-            )}
-            {paying && (
-              <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Processing payment…
+            {/* Zepto-style summary card + sticky "Pay ₹X" CTA */}
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+                <span className="text-[13px] font-medium text-slate-600">Amount due</span>
+                <span className="text-xl font-extrabold text-slate-900">{formatINR(order.grandTotal)}</span>
               </div>
-            )}
+              <div className="p-4">
+                <Button
+                  size="lg"
+                  className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/25 transition-all hover:bg-orange-700 active:scale-[0.99]"
+                  onClick={() => setCheckoutOpen(true)}
+                  disabled={!restaurant.paymentMethods || restaurant.paymentMethods.length === 0}
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Pay {formatINR(order.grandTotal)}
+                </Button>
+                {(!restaurant.paymentMethods || restaurant.paymentMethods.length === 0) && (
+                  <p className="mt-3 text-center text-xs text-amber-600">
+                    No payment methods configured. Please ask the staff.
+                  </p>
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>
+
+      {/* Zepto-style Checkout Sheet (existing-order mode) */}
+      <CheckoutSheet
+        open={checkoutOpen}
+        onOpenChange={setCheckoutOpen}
+        restaurant={restaurant}
+        totals={{
+          itemCount: order.items?.length || 0,
+          subtotal: order.subtotal,
+          taxAmount: order.taxAmount,
+          serviceCharge: order.serviceCharge,
+          grandTotal: order.grandTotal,
+        }}
+        items={[]}
+        existingOrderId={order.id}
+        skipCustomerDetails
+        onCheckoutComplete={() => {
+          setCheckoutOpen(false)
+          qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+        }}
+      />
     </div>
   )
 }

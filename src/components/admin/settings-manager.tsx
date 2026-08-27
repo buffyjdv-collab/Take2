@@ -197,77 +197,8 @@ export function SettingsManager() {
         </TabsContent>
 
         <TabsContent value="payments">
-          {/* NEW: Zepto-style Payment Methods Manager */}
+          {/* Zepto-style Payment Methods Manager */}
           <PaymentMethodsManager restaurantId={effectiveId || undefined} />
-
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle className="text-base">Payment collection timing</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Choose when the customer must pay for their order. This affects
-                the entire order flow — see the helper text under each option.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <ToggleRow
-                label="Allow pre-payment requests"
-                checked={form.settings?.allowPrePayment ?? true}
-                onChange={(v) => setSettings({ allowPrePayment: v })}
-              />
-              <p className="-mt-2 ml-1 text-xs text-muted-foreground">
-                Lets you (or the cashier) ask the customer to pay BEFORE the
-                order is accepted. Disable to forbid pre-payment entirely.
-              </p>
-
-              <ToggleRow
-                label="Require pre-payment for every new order"
-                checked={form.settings?.requirePrePayment ?? false}
-                onChange={(v) => setSettings({ requirePrePayment: v })}
-                disabled={!form.settings?.allowPrePayment}
-              />
-              <p className="-mt-2 ml-1 text-xs text-muted-foreground">
-                When ON, every new order is created with status
-                <code className="mx-1 rounded bg-amber-100 px-1 text-[10px] text-amber-800">PENDING_PAYMENT</code>
-                and is hidden from the kitchen/orders module until the customer
-                pays. Once paid, the order automatically moves to NEW and
-                becomes visible for acceptance.
-              </p>
-
-              <div className="my-2 border-t border-slate-100" />
-
-              <ToggleRow
-                label="Allow post-payment requests"
-                checked={form.settings?.allowPostPayment ?? true}
-                onChange={(v) => setSettings({ allowPostPayment: v })}
-              />
-              <p className="-mt-2 ml-1 text-xs text-muted-foreground">
-                Lets you (or the waiter) ask the customer to pay AFTER the order
-                is served. Disable to forbid post-payment entirely.
-              </p>
-
-              <ToggleRow
-                label="Require post-payment for every served order"
-                checked={form.settings?.requirePostPayment ?? false}
-                onChange={(v) => setSettings({ requirePostPayment: v })}
-                disabled={!form.settings?.allowPostPayment}
-              />
-              <p className="-mt-2 ml-1 text-xs text-muted-foreground">
-                When ON, every order that reaches SERVED status automatically
-                gets a post-payment request — the customer is prompted to pay
-                before leaving the table.
-              </p>
-
-              <div className="my-2 border-t border-slate-100" />
-
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                <strong>Cash payments:</strong> Waiters, owners, managers, and
-                cashiers can mark any unpaid order as &ldquo;Paid in cash&rdquo;
-                (or &ldquo;Paid at counter&rdquo;) from the orders module. The
-                acting user&apos;s name is recorded on the order and appears in
-                the payments report.
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="theme">

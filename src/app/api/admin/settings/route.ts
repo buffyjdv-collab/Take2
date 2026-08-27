@@ -131,19 +131,6 @@ export async function PATCH(req: NextRequest) {
             ...(settingsPatch.taxInclusive !== undefined
               ? { taxInclusive: settingsPatch.taxInclusive }
               : {}),
-            // Payment timing controls (managed by restaurant owner / super admin)
-            ...(settingsPatch.allowPrePayment !== undefined
-              ? { allowPrePayment: settingsPatch.allowPrePayment }
-              : {}),
-            ...(settingsPatch.allowPostPayment !== undefined
-              ? { allowPostPayment: settingsPatch.allowPostPayment }
-              : {}),
-            ...(settingsPatch.requirePrePayment !== undefined
-              ? { requirePrePayment: settingsPatch.requirePrePayment }
-              : {}),
-            ...(settingsPatch.requirePostPayment !== undefined
-              ? { requirePostPayment: settingsPatch.requirePostPayment }
-              : {}),
           },
         })
       } else {
@@ -161,10 +148,6 @@ export async function PATCH(req: NextRequest) {
             allowRequestBill: settingsPatch.allowRequestBill ?? true,
             maxItemsPerOrder: settingsPatch.maxItemsPerOrder ?? 50,
             taxInclusive: settingsPatch.taxInclusive ?? false,
-            allowPrePayment: settingsPatch.allowPrePayment ?? true,
-            allowPostPayment: settingsPatch.allowPostPayment ?? true,
-            requirePrePayment: settingsPatch.requirePrePayment ?? false,
-            requirePostPayment: settingsPatch.requirePostPayment ?? false,
           },
         })
       }
