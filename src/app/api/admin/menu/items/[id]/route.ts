@@ -41,6 +41,7 @@ export async function PATCH(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  try {
   const { user, error } = await requirePermission('menu.update')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
@@ -168,6 +169,13 @@ export async function PATCH(
 
   writeAudit(user, 'UPDATE', 'MENU_ITEM', id, data)
   return ok(updated)
+  } catch (err: any) {
+    console.error('[menu-items PATCH] unhandled error:', err)
+    return fail(
+      `Failed to update item: ${err.message || 'Unknown error'}. Please try again.`,
+      500,
+    )
+  }
 }
 
 // DELETE /api/admin/menu/items/[id]

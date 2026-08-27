@@ -47,9 +47,14 @@ export async function api<T>(
       ...(init?.headers || {}),
     },
   })
-  const data = await res.json().catch(() => ({}))
+  let data: any
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error(`Request failed (${res.status}) — the server returned an invalid response.`)
+  }
   if (!res.ok) {
-    throw new Error((data && data.error) || `Request failed (${res.status})`)
+    throw new Error(data?.error || `Request failed (${res.status})`)
   }
   return (data && data.data !== undefined ? data.data : data) as T
 }
