@@ -544,3 +544,4 @@ Stage Summary:
 - All block/unblock actions invalidate both ['platform-fees'] and ['platform-tenants'] query keys so the UI refreshes instantly without a manual reload
 - API contract for /api/platform/fees was NOT changed — only the new overdueTenants field is consumed. The /api/platform/restaurants GET response gained three new fields (platformFeeBlocked, platformFeeBlockedAt, platformFeeBlockReason) which are purely additive
 - Files changed: 3 (1 API route + 2 UI components)
+
