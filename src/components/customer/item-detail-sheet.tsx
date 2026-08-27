@@ -17,7 +17,7 @@ import { Separator } from '@/components/ui/separator'
 import { VegBadge } from '@/components/restaurant/veg-badge'
 import { SpicyBadge } from '@/components/restaurant/spicy-badge'
 import { Price } from '@/components/restaurant/price'
-import { Minus, Plus, Flame } from 'lucide-react'
+import { Minus, Plus } from 'lucide-react'
 import { useCustomerCart, lineKeyOf } from '@/stores/customer-cart'
 import type { MenuItemWithRelations } from './types'
 import { toast } from 'sonner'
@@ -42,7 +42,6 @@ export function ItemDetailSheet({
     Record<string, string[]>
   >({})
 
-  // Reset local state when item changes
   useEffect(() => {
     if (item) {
       setQuantity(1)
@@ -93,7 +92,6 @@ export function ItemDetailSheet({
 
   if (!item) return null
 
-  // Validation for required groups
   const requiredGroupsValid = item.modifierGroups
     .filter((g) => g.required)
     .every((g) => (selectedModifierIds[g.id] || []).length >= g.minSelection)
@@ -146,12 +144,12 @@ export function ItemDetailSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[92vh]">
-        <DrawerHeader className="px-0">
+      <DrawerContent className="max-h-[92vh] rounded-t-3xl">
+        <div className="mx-auto mb-0 mt-2 h-1 w-10 rounded-full bg-slate-300" />
+        <DrawerHeader className="px-0 pb-0">
           <DrawerTitle className="sr-only">{item.name}</DrawerTitle>
-          <div className="relative h-44 w-full overflow-hidden bg-orange-50">
+          <div className="relative h-48 w-full overflow-hidden bg-gradient-to-br from-orange-50 to-amber-50">
             {item.image ? (
-               
               <img
                 src={item.image}
                 alt={item.name}
@@ -165,59 +163,59 @@ export function ItemDetailSheet({
           </div>
         </DrawerHeader>
 
-        <div className="max-h-[42vh] overflow-y-auto px-4 pb-2">
-          <div className="mb-1 flex items-center gap-2">
+        <div className="max-h-[42vh] overflow-y-auto px-5 pb-2 pt-4">
+          <div className="mb-2 flex items-center gap-2">
             <VegBadge isVeg={item.isVeg} />
             {item.isSpicy && <SpicyBadge />}
             {item.isFeatured && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                Featured
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                ★ Featured
               </span>
             )}
           </div>
-          <h2 className="text-xl font-bold text-slate-900">{item.name}</h2>
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900">{item.name}</h2>
           {item.description && (
-            <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
+            <p className="mt-1.5 text-[14px] leading-relaxed text-slate-500">{item.description}</p>
           )}
-          <div className="mt-2 flex items-center gap-3">
-            <Price amount={unitPrice} size="lg" />
-            <span className="text-xs text-muted-foreground">
+          <div className="mt-2.5 flex items-center gap-3">
+            <Price amount={unitPrice} size="lg" className="text-slate-900" />
+            <span className="text-[12px] text-slate-400">
               ~{item.prepTime} min prep
             </span>
           </div>
 
-          <Separator className="my-4" />
+          <Separator className="my-5" />
 
           {/* Variants */}
           {item.variants.length > 0 && (
-            <div className="mb-4">
-              <Label className="text-sm font-semibold">Choose size</Label>
+            <div className="mb-5">
+              <Label className="text-[14px] font-bold text-slate-800">Choose size</Label>
               <RadioGroup
                 value={selectedVariantId}
                 onValueChange={setSelectedVariantId}
-                className="mt-2 grid grid-cols-1 gap-1"
+                className="mt-2.5 space-y-2"
               >
                 {item.variants.map((v) => (
                   <label
                     key={v.id}
                     htmlFor={`v-${v.id}`}
                     className={cn(
-                      'flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors',
+                      'flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-[14px] transition-all',
                       selectedVariantId === v.id
-                        ? 'border-orange-500 bg-orange-50'
-                        : 'border-slate-200 hover:bg-slate-50',
+                        ? 'border-orange-400 bg-orange-50/60 ring-1 ring-orange-200'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
                     )}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
                       <RadioGroupItem id={`v-${v.id}`} value={v.id} />
-                      <span className="font-medium">{v.name}</span>
+                      <span className="font-medium text-slate-800">{v.name}</span>
                       {v.isDefault && (
-                        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
                           default
                         </span>
                       )}
                     </div>
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-sm text-slate-500">
                       {v.priceModifier > 0
                         ? `+₹${v.priceModifier}`
                         : v.priceModifier < 0
@@ -232,12 +230,12 @@ export function ItemDetailSheet({
 
           {/* Modifier groups */}
           {item.modifierGroups.map((grp) => (
-            <div key={grp.id} className="mb-4">
+            <div key={grp.id} className="mb-5">
               <div className="mb-2 flex items-center justify-between">
-                <Label className="text-sm font-semibold">{grp.name}</Label>
-                <span className="text-[11px] text-muted-foreground">
+                <Label className="text-[14px] font-bold text-slate-800">{grp.name}</Label>
+                <span className="text-[12px] text-slate-400">
                   {grp.selectionType === 'SINGLE' ? 'Choose one' : `Up to ${grp.maxSelection}`}
-                  {grp.required && <span className="ml-1 text-orange-600">*</span>}
+                  {grp.required && <span className="ml-1 text-orange-500">*</span>}
                 </span>
               </div>
               {grp.selectionType === 'SINGLE' ? (
@@ -246,58 +244,54 @@ export function ItemDetailSheet({
                   onValueChange={(val) =>
                     setSelectedModifierIds((p) => ({ ...p, [grp.id]: [val] }))
                   }
-                  className="grid grid-cols-1 gap-1"
+                  className="space-y-2"
                 >
                   {grp.modifiers.map((m) => (
                     <label
                       key={m.id}
                       htmlFor={`m-${m.id}`}
                       className={cn(
-                        'flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors',
+                        'flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-[14px] transition-all',
                         (selectedModifierIds[grp.id] || []).includes(m.id)
-                          ? 'border-orange-500 bg-orange-50'
-                          : 'border-slate-200 hover:bg-slate-50',
+                          ? 'border-orange-400 bg-orange-50/60 ring-1 ring-orange-200'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
                       )}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
                         <RadioGroupItem id={`m-${m.id}`} value={m.id} />
-                        <span>{m.name}</span>
+                        <span className="text-slate-800">{m.name}</span>
                       </div>
                       {m.price > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                          +₹{m.price}
-                        </span>
+                        <span className="text-sm text-slate-500">+₹{m.price}</span>
                       )}
                     </label>
                   ))}
                 </RadioGroup>
               ) : (
-                <div className="grid grid-cols-1 gap-1">
+                <div className="space-y-2">
                   {grp.modifiers.map((m) => {
                     const checked = (selectedModifierIds[grp.id] || []).includes(m.id)
                     return (
                       <label
                         key={m.id}
                         className={cn(
-                          'flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors',
+                          'flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-[14px] transition-all',
                           checked
-                            ? 'border-orange-500 bg-orange-50'
-                            : 'border-slate-200 hover:bg-slate-50',
+                            ? 'border-orange-400 bg-orange-50/60 ring-1 ring-orange-200'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
                         )}
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                           <Checkbox
                             checked={checked}
                             onCheckedChange={() =>
                               handleToggleMultiple(grp.id, m.id, grp.maxSelection)
                             }
                           />
-                          <span>{m.name}</span>
+                          <span className="text-slate-800">{m.name}</span>
                         </div>
                         {m.price > 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            +₹{m.price}
-                          </span>
+                          <span className="text-sm text-slate-500">+₹{m.price}</span>
                         )}
                       </label>
                     )
@@ -309,7 +303,7 @@ export function ItemDetailSheet({
 
           {/* Special instructions */}
           <div className="mb-2">
-            <Label htmlFor="notes" className="text-sm font-semibold">
+            <Label htmlFor="notes" className="text-[14px] font-bold text-slate-800">
               Special instructions
             </Label>
             <Textarea
@@ -318,28 +312,30 @@ export function ItemDetailSheet({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               maxLength={280}
-              className="mt-1.5"
+              className="mt-2 rounded-xl border-slate-200 text-[14px] focus-visible:ring-orange-400"
               rows={2}
             />
           </div>
         </div>
 
-        <DrawerFooter className="flex-row items-center justify-between gap-3 border-t bg-white px-4 pt-3">
-          <div className="flex items-center gap-2">
+        <DrawerFooter className="flex-row items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 pt-3 pb-7">
+ <div className="flex items-center gap-3">
             <Button
               variant="outline"
               size="icon"
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
               disabled={quantity <= 1}
+              className="h-10 w-10 rounded-xl"
               aria-label="Decrease quantity"
             >
               <Minus className="h-4 w-4" />
             </Button>
-            <span className="w-8 text-center font-semibold">{quantity}</span>
+            <span className="w-8 text-center text-base font-bold text-slate-900">{quantity}</span>
             <Button
               variant="outline"
               size="icon"
               onClick={() => setQuantity((q) => Math.min(50, q + 1))}
+              className="h-10 w-10 rounded-xl"
               aria-label="Increase quantity"
             >
               <Plus className="h-4 w-4" />
@@ -348,7 +344,7 @@ export function ItemDetailSheet({
           <Button
             onClick={handleAdd}
             disabled={!requiredGroupsValid}
-            className="flex-1 bg-orange-600 text-white hover:bg-orange-700"
+            className="h-11 flex-1 rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/20 transition-all hover:bg-orange-700 hover:shadow-orange-600/30 active:scale-[0.99]"
           >
             Add to cart · ₹{(unitPrice * quantity).toFixed(0)}
           </Button>

@@ -11,13 +11,11 @@ interface CategoryTabsProps {
 }
 
 export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsProps) {
-  // If no active id, default to first
   const effectiveActive = activeId || categories[0]?.id || ''
   const scrollRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
 
-  // Detect horizontal overflow so we can show/hide the arrow buttons.
   const updateScrollState = () => {
     const el = scrollRef.current
     if (!el) return
@@ -30,7 +28,6 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
     const el = scrollRef.current
     if (!el) return
     el.addEventListener('scroll', updateScrollState, { passive: true })
-    // Re-check on resize
     window.addEventListener('resize', updateScrollState)
     return () => {
       el.removeEventListener('scroll', updateScrollState)
@@ -38,8 +35,6 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
     }
   }, [categories.length])
 
-  // When activeId changes (via swipe on the menu body or via the dropdown),
-  // scroll the corresponding tab into view so it stays visible.
   useEffect(() => {
     if (!effectiveActive || !scrollRef.current) return
     const idx = categories.findIndex((c) => c.id === effectiveActive)
@@ -52,7 +47,6 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
         block: 'nearest',
       })
     }
-    // Re-check arrows after the smooth scroll settles
     setTimeout(updateScrollState, 250)
   }, [effectiveActive, categories.length])
 
@@ -64,7 +58,6 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
     }
   }
 
-  // Programmatic scroll for the arrow buttons (Swiggy-style left/right chevrons).
   const scrollByTabs = (dir: 'left' | 'right') => {
     const el = scrollRef.current
     if (!el) return
@@ -76,24 +69,34 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
   }
 
   return (
-    <div className="sticky top-[68px] z-20 -mb-2 border-b border-orange-100 bg-white/95 backdrop-blur">
+    <div className="sticky top-[57px] z-20 -mb-px border-b border-slate-100 bg-white">
       <div className="mx-auto max-w-3xl px-2">
         <div className="relative">
-          {/* Left chevron (appears only when scrollable) */}
+          {/* Left gradient fade */}
+          {canScrollLeft && (
+            <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-white to-transparent" />
+          )}
+
+          {/* Right gradient fade */}
+          {canScrollRight && (
+            <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l from-white to-transparent" />
+          )}
+
+          {/* Left chevron */}
           {canScrollLeft && (
             <button
               onClick={() => scrollByTabs('left')}
-              className="absolute left-0 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-slate-500 shadow-md ring-1 ring-slate-200 hover:text-slate-900"
+              className="absolute left-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-slate-500 shadow-md ring-1 ring-slate-200 transition-colors hover:bg-slate-50 hover:text-slate-900"
               aria-label="Scroll categories left"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
           )}
 
-          {/* Tabs row — horizontally scrollable + swipeable */}
+          {/* Tabs row */}
           <div
             ref={scrollRef}
-            className="flex gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex gap-0 overflow-x-auto py-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             style={{
               scrollSnapType: 'x mandatory',
               WebkitOverflowScrolling: 'touch',
@@ -107,14 +110,20 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
                   onClick={() => selectCategory(c.id)}
                   style={{ scrollSnapAlign: 'center' }}
                   className={cn(
-                    'flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all',
+                    'relative shrink-0 px-4 py-3.5 text-[13px] font-medium transition-colors',
                     active
-                      ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
-                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100',
+                      ? 'text-orange-600'
+                      : 'text-slate-500 hover:text-slate-800',
                   )}
                 >
-                  {c.icon && <span className="text-base">{c.icon}</span>}
-                  <span>{c.name}</span>
+                  <span className="flex items-center gap-1.5">
+                    {c.icon && <span className="text-sm">{c.icon}</span>}
+                    {c.name}
+                  </span>
+                  {/* Underline indicator — Swiggy style */}
+                  {active && (
+                    <span className="absolute inset-x-3 -bottom-px h-[3px] rounded-full bg-orange-600 transition-all" />
+                  )}
                 </button>
               )
             })}
@@ -124,7 +133,7 @@ export function CategoryTabs({ categories, activeId, onChange }: CategoryTabsPro
           {canScrollRight && (
             <button
               onClick={() => scrollByTabs('right')}
-              className="absolute right-0 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-slate-500 shadow-md ring-1 ring-slate-200 hover:text-slate-900"
+              className="absolute right-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-slate-500 shadow-md ring-1 ring-slate-200 transition-colors hover:bg-slate-50 hover:text-slate-900"
               aria-label="Scroll categories right"
             >
               <ChevronRight className="h-4 w-4" />

@@ -18,34 +18,39 @@ export function FloatingCartButton({ onClick }: { onClick: () => void }) {
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ y: 80, opacity: 0 }}
+        initial={{ y: 100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 80, opacity: 0 }}
-        className="fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
+        exit={{ y: 100, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        className="fixed inset-x-0 bottom-0 z-30"
       >
+        {/* Gradient overlay above the bar */}
+        <div className="h-6 bg-gradient-to-t from-black/10 to-transparent" />
         <button
           onClick={onClick}
-          className="flex w-full max-w-md items-center justify-between gap-3 rounded-2xl bg-emerald-600 px-5 py-3 text-white shadow-xl shadow-emerald-600/30 transition-all hover:bg-emerald-700 hover:shadow-emerald-600/40 active:scale-[0.99]"
+          className="flex w-full items-center justify-between bg-orange-600 px-5 py-4 text-white shadow-2xl shadow-orange-600/30 transition-all active:scale-[0.995] sm:rounded-t-2xl"
         >
           <div className="flex items-center gap-3">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+            <div className="relative">
               <ShoppingBag className="h-5 w-5" />
               <motion.span
                 key={t?.itemCount || 0}
-                initial={{ scale: 1.4 }}
-                animate={{ scale: 1 }}
+                initial={{ scale: 1.5, y: -2 }}
+                animate={{ scale: 1, y: 0 }}
                 transition={{ type: 'spring', stiffness: 600, damping: 20 }}
-                className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-emerald-700"
+                className="absolute -right-2.5 -top-2.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white px-1 text-[11px] font-extrabold leading-none text-orange-700"
               >
                 {t?.itemCount || 0}
               </motion.span>
             </div>
-            <span className="font-semibold tracking-tight">View cart</span>
+            <span className="text-[15px] font-bold">
+              {t?.itemCount === 1 ? `${t?.itemCount} ITEM` : `${t?.itemCount} ITEMS`}
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold">₹{(t?.grandTotal || 0).toFixed(0)}</span>
+            <span className="text-lg font-extrabold">₹{(t?.grandTotal || 0).toFixed(0)}</span>
             <svg
-              className="h-4 w-4"
+              className="h-5 w-5 opacity-80"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -53,7 +58,7 @@ export function FloatingCartButton({ onClick }: { onClick: () => void }) {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path d="M5 12h14M13 5l7 7-7 7" />
+              <path d="M9 18l6-6-6-6" />
             </svg>
           </div>
         </button>
