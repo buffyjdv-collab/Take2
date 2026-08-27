@@ -66,7 +66,7 @@ export function CustomerApp({ token }: { token: string }) {
   useEffect(() => {
     const apply = () => {
       const h = window.location.hash.replace('#', '')
-      if (['cart', 'checkout', 'track', 'bill'].includes(h)) {
+      if (['track', 'bill'].includes(h)) {
         setView(h as View)
       } else {
         setView('menu')
@@ -188,6 +188,12 @@ export function CustomerApp({ token }: { token: string }) {
             onSelectItem={(id) => setActiveItemId(id)}
           />
         </>
+      )}
+
+      {view === 'track' && !placedOrderId && (
+        <div className="flex flex-1 items-center justify-center p-8 text-center">
+          <p className="text-sm text-muted-foreground">No active order to track.</p>
+        </div>
       )}
 
       {view === 'track' && placedOrderId && (

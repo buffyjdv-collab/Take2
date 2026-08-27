@@ -167,8 +167,18 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
             const tableToken = new URLSearchParams(window.location.search).get('table') || ''
             sessionStorage.setItem(`order-${tableToken}`, order.id)
             sessionStorage.setItem('returning-from-upi', '1')
-            window.location.href = init.upiDeepLink
-            return // stop execution — page is navigating away
+            // Use window.open instead of window.location.href so the page
+            // stays alive and sessionStorage is preserved. If the UPI app
+            // fails or the user cancels, they can still see the tracking page.
+            window.open(init.upiDeepLink, '_blank')
+            // Navigate to tracking immediately so the user sees order status
+            onCheckout(order.id)
+            clear()
+            setCustomerName('')
+            setCustomerPhone('')
+            setTouched(false)
+            setConfirmOpen(false)
+            return // stop execution — UPI app opened in new tab
           }
 
           // For QR method: the QR code is displayed in the dialog (no auto-redirect)
@@ -197,6 +207,16 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
           setPaymentStep('idle')
           setSelectedMethod(null)
           toast.error(payErr.message || 'Payment failed. Please try again.')
+          // The order was already created on the server — navigate to the
+          // tracking page so the customer can retry payment from there.
+          if (order?.id) {
+            onCheckout(order.id)
+            clear()
+            setCustomerName('')
+            setCustomerPhone('')
+            setTouched(false)
+            setConfirmOpen(false)
+          }
         }
       }
     } catch (err: any) {
