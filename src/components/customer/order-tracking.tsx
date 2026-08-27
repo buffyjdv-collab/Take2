@@ -141,6 +141,7 @@ export function OrderTracking({
         // For UPI method: open the deep link to launch the customer's UPI app
         if (init.upiDeepLink) {
           window.location.href = init.upiDeepLink
+          return // page is navigating away — nothing else to do
         }
       }
       // Simulate payment verification (in production this would be a webhook)
@@ -167,6 +168,7 @@ export function OrderTracking({
       const init = await initiate.mutateAsync({ orderId, method })
       if (method === 'UPI' && init.upiDeepLink) {
         window.location.href = init.upiDeepLink
+        return // page is navigating away — nothing else to do
       }
       toast.info('Connecting to payment gateway…')
       await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))

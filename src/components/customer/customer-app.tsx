@@ -38,9 +38,18 @@ export function CustomerApp({ token }: { token: string }) {
   // NOTE: this is for tracking convenience — it does NOT force navigation.
   // The customer always lands on the menu view by default; they can opt to
   // view an existing order's tracking page via the "Track order" button.
+  // Exception: if the customer is returning from a UPI payment redirect,
+  // auto-navigate to the tracking view.
   useEffect(() => {
     const saved = sessionStorage.getItem(`order-${token}`)
     if (saved) setPlacedOrderId(saved)
+
+    // Auto-navigate to tracking if returning from UPI payment
+    const returningFromUpi = sessionStorage.getItem('returning-from-upi')
+    if (returningFromUpi && saved) {
+      sessionStorage.removeItem('returning-from-upi')
+      window.location.hash = 'track'
+    }
   }, [token])
 
   const { data, isLoading, error } = useCustomerMenu(token)

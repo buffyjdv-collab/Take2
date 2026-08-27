@@ -160,9 +160,15 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
           setUpiQrPayload(init.upiQrPayload || null)
           setUpiId(init.upiId || null)
 
-          // For UPI method: open the deep link to launch the customer's UPI app
+          // For UPI method: save order to sessionStorage and set a flag
+          // BEFORE redirecting to the UPI app. When the customer returns,
+          // customer-app will detect the flag and auto-show the tracking page.
           if (method === 'UPI' && init.upiDeepLink) {
+            const tableToken = new URLSearchParams(window.location.search).get('table') || ''
+            sessionStorage.setItem(`order-${tableToken}`, order.id)
+            sessionStorage.setItem('returning-from-upi', '1')
             window.location.href = init.upiDeepLink
+            return // stop execution — page is navigating away
           }
 
           // For QR method: the QR code is displayed in the dialog (no auto-redirect)
