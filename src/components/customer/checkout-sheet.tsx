@@ -41,6 +41,8 @@ import {
   ChevronLeft,
   ShieldCheck,
   Lock,
+  AlertCircle,
+  ArrowRight,
   type LucideIcon,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -82,7 +84,7 @@ interface Props {
   skipCustomerDetails?: boolean
 }
 
-type Step = 'details' | 'method' | 'upi_launch' | 'qr' | 'processing' | 'success'
+type Step = 'details' | 'method' | 'upi_launch' | 'qr' | 'processing' | 'success' | 'error'
 
 const ICON_FOR_METHOD: Record<string, LucideIcon> = {
   UPI: Smartphone,
@@ -120,6 +122,7 @@ export function CheckoutSheet({
   const [upiQrPayload, setUpiQrPayload] = useState<string | null>(null)
   const [upiId, setUpiId] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string>('')
+  const [errorMessage, setErrorMessage] = useState<string>('')
 
   // Reset everything when the sheet closes
   useEffect(() => {
@@ -276,8 +279,23 @@ export function CheckoutSheet({
       setSuccessMessage('Payment successful! Your order is confirmed.')
       setStep('success')
     } catch (err: any) {
-      setStep('method')
-      toast.error(err?.message || 'Payment failed. Please try again.')
+      // CRITICAL: do NOT silently reset to 'method'. If the order was already
+      // placed, the customer has a placed order in the system — we MUST route
+      // them to the tracking page (or give them an explicit way to retry).
+      //
+      // - If placedOrderId is set (order was created in this sheet OR the sheet
+      //   was opened in existing-order mode) → go to 'error' step which offers
+      //   "Track order" + "Try again" so they're never stuck.
+      // - Otherwise (e.g. placeOrder itself failed) → back to 'method' so they
+      //   can retry selecting a method, but still surface the error.
+      const msg = err?.message || 'Payment failed. Please try again.'
+      setErrorMessage(msg)
+      if (placedOrderId) {
+        setStep('error')
+      } else {
+        setStep('method')
+      }
+      toast.error(msg)
     }
   }
 
@@ -291,6 +309,25 @@ export function CheckoutSheet({
     }
   }, [step, placedOrderId, onCheckoutComplete])
 
+  // Manual redirect from the error step → route to tracking page
+  const goToTracking = () => {
+    if (placedOrderId) {
+      onCheckoutComplete(placedOrderId)
+    }
+  }
+
+  // Retry payment on the SAME order (clears the failed attempt and lets the
+  // customer pick a different method or retry the same one). We keep
+  // placedOrderId intact so `ensureOrderPlaced()` returns the existing order.
+  const retryPayment = () => {
+    setErrorMessage('')
+    setSelectedMethod(null)
+    setUpiDeepLink(null)
+    setUpiQrPayload(null)
+    setUpiId(null)
+    setStep('method')
+  }
+
   const canPay = !!selectedMethod && (skipCustomerDetails || formValid) && !placeOrder.isPending
 
   // --------------------------------------------------------------------------
@@ -300,7 +337,18 @@ export function CheckoutSheet({
     <Sheet
       open={open}
       onOpenChange={(o) => {
+        // Block close during processing + success (auto-redirect in flight)
         if (step === 'processing' || step === 'success') return
+        // If the customer tries to close the sheet during the 'error' step
+        // AND the order was placed, route them to the tracking page instead
+        // of just dismissing — they have an order in the system that they
+        // need to be able to track. Only fall through to a normal close if
+        // there's no placed order (e.g. the initial placeOrder call itself
+        // failed, so there's nothing to track).
+        if (!o && step === 'error' && placedOrderId) {
+          onCheckoutComplete(placedOrderId)
+          return
+        }
         onOpenChange(o)
       }}
     >
@@ -611,6 +659,86 @@ export function CheckoutSheet({
                 <p className="text-[11px] text-slate-400">Redirecting to order tracking…</p>
               </motion.div>
             )}
+
+            {/* Step: Error — order placed but payment failed.
+                Give the customer an explicit way to either retry or go to
+                the tracking page. This is the fix for the bug where the
+                tracking page wouldn't load after a payment error. */}
+            {step === 'error' && (
+              <motion.div
+                key="error"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col items-center gap-4 px-2 py-8 text-center"
+              >
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+                  className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-50"
+                >
+                  <AlertCircle className="h-8 w-8 text-amber-600" />
+                </motion.div>
+                <div className="space-y-1">
+                  <p className="text-[15px] font-bold text-slate-900">
+                    Payment couldn&apos;t be completed
+                  </p>
+                  <p className="px-4 text-[12px] text-slate-500">
+                    {errorMessage
+                      ? `Reason: ${errorMessage}`
+                      : 'Something went wrong while processing your payment.'}
+                  </p>
+                </div>
+
+                {/* Reassurance: only show in initial-placement mode. In
+                    existing-order mode the customer already knew the order
+                    existed — they just wanted to pay for it. */}
+                {!existingOrderId && (
+                  <div className="w-full rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-left">
+                    <p className="text-[12px] font-semibold text-emerald-800">
+                      Good news: your order was placed.
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-emerald-700">
+                      It&apos;s in the kitchen queue. You can retry payment now or
+                      settle it later from the tracking page.
+                    </p>
+                  </div>
+                )}
+
+                {/* Actions — primary = retry, secondary = go to tracking (or close in existing-order mode) */}
+                <div className="flex w-full flex-col gap-2">
+                  <Button
+                    size="lg"
+                    className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/25 transition-all hover:bg-orange-700 active:scale-[0.99]"
+                    onClick={retryPayment}
+                  >
+                    Try a different payment method
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="h-11 w-full rounded-xl border-slate-300 text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      // In existing-order mode (bill-view / order-tracking),
+                      // "go to tracking" doesn't apply — just close the sheet
+                      // and refetch so the parent UI reflects the failed state.
+                      if (existingOrderId) {
+                        onCheckoutComplete(placedOrderId || existingOrderId)
+                      } else {
+                        goToTracking()
+                      }
+                    }}
+                  >
+                    {existingOrderId ? 'Close' : 'Go to order tracking'}
+                    {!existingOrderId && <ArrowRight className="ml-2 h-4 w-4" />}
+                  </Button>
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  You can also pay later from the tracking page or by asking the waiter.
+                </p>
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
@@ -663,6 +791,8 @@ function stepTitle(step: Step): string {
       return 'Processing'
     case 'success':
       return 'Order placed!'
+    case 'error':
+      return 'Payment failed'
   }
 }
 
