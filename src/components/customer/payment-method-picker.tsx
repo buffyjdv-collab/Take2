@@ -233,14 +233,26 @@ export function filterAvailableForCheckout(methods: PaymentMethodT[] | undefined
 }
 
 /**
- * Identify "pay-on-delivery" methods — ones where the customer pays LATER,
- * in person, after the order is served. These should be hidden from the
- * post-serve payment picker if the customer already chose one at order
- * placement (otherwise they'd be asked to pick it again — confusing UX).
+ * "Pay-on-delivery" methods — ones where the customer pays LATER, in person,
+ * after the order is served. When the customer chooses one of these at order
+ * placement, the post-serve payment picker hides the "in-person / deferred"
+ * variants (Counter + Pay Later) but keeps Cash visible — the waiter can
+ * still collect cash at the table, and online methods (UPI / QR / Card /
+ * Wallet / Net Banking) remain available so the customer can switch to
+ * paying online.
  *
- * Pay-on-delivery types: CASH, COUNTER, PAY_LATER
+ * Pay-on-delivery trigger types: CASH, COUNTER, PAY_LATER
+ *   → hidden from the post-serve picker: COUNTER, PAY_LATER
+ *   → kept visible on the post-serve picker: CASH + all online methods
  */
 export const PAY_ON_DELIVERY_TYPES = ['CASH', 'COUNTER', 'PAY_LATER']
+
+/**
+ * Types that should be HIDDEN from the post-serve picker when the customer
+ * already chose a pay-on-delivery method at placement. Counter + Pay Later
+ * only — Cash stays visible (waiter can collect at the table).
+ */
+export const HIDE_POST_SERVE_TYPES = ['COUNTER', 'PAY_LATER']
 
 export function isPayOnDelivery(method: PaymentMethodT | undefined | null): boolean {
   if (!method) return false

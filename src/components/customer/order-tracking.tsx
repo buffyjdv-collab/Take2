@@ -50,6 +50,7 @@ import { VegBadge } from '@/components/restaurant/veg-badge'
 import type { OrderStatus } from '@/lib/types'
 import type { RestaurantInfo } from './types'
 import { CheckoutSheet } from './checkout-sheet'
+import { HIDE_POST_SERVE_TYPES, PAY_ON_DELIVERY_TYPES } from './payment-method-picker'
 
 // ---------------------------------------------------------------------------
 // Status config — drives the hero card + stepper
@@ -177,21 +178,26 @@ export function OrderTracking({
   const itemCount = order.items?.length || 0
 
   // Compute which payment-method IDs to hide from the post-serve picker.
-  // Rule: if the customer already chose a pay-on-delivery method (Cash /
-  // Counter / Pay Later) at order placement, hide ALL pay-on-delivery methods
-  // from the post-serve picker — they all mean "pay in person later" and
-  // showing them again would be confusing. Online methods (UPI / Card /
-  // Wallet / Net Banking) are still shown because the customer might want to
-  // pay online instead of settling in cash.
+  //
+  // Rule: when the customer already chose a pay-on-delivery method at order
+  // placement, hide Counter + Pay Later (those mean "pay at counter / settle
+  // later" — they'd be confusing to show again post-serve). KEEP Cash visible
+  // because the waiter can still collect cash at the table — and keep all the
+  // online methods (UPI / QR / Card / Wallet / Net Banking) so the customer
+  // can switch to paying online if they prefer.
+  //
+  // Net effect on the post-serve picker when customer chose pay-on-delivery:
+  //   ✅ UPI   ✅ Scan QR   ✅ Card   ✅ Wallet   ✅ Net Banking   ✅ Cash
+  //   ❌ Pay at Counter   ❌ Pay Later
   const hiddenMethodIds: string[] = (() => {
     const chosenId = (order as any)?.paymentMethodId as string | null | undefined
     const chosenType = (order as any)?.paymentMethod as string | null | undefined
     if (!chosenId || !chosenType) return []
-    if (!['CASH', 'COUNTER', 'PAY_LATER'].includes(chosenType)) return []
-    // Customer chose a pay-on-delivery method → hide ALL pay-on-delivery
-    // methods (Cash + Counter + Pay Later) from the post-serve picker.
+    if (!PAY_ON_DELIVERY_TYPES.includes(chosenType)) return []
+    // Customer chose a pay-on-delivery method → hide only COUNTER + PAY_LATER
+    // (Cash stays visible — waiter can still collect cash at the table).
     return (restaurant?.paymentMethods || [])
-      .filter((m) => ['CASH', 'COUNTER', 'PAY_LATER'].includes(m.type))
+      .filter((m) => HIDE_POST_SERVE_TYPES.includes(m.type))
       .map((m) => m.id)
   })()
 
