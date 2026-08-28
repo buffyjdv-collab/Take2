@@ -176,6 +176,25 @@ export function OrderTracking({
   const HeroIcon = currentStepConfig?.icon || Clock
   const itemCount = order.items?.length || 0
 
+  // Compute which payment-method IDs to hide from the post-serve picker.
+  // Rule: if the customer already chose a pay-on-delivery method (Cash /
+  // Counter / Pay Later) at order placement, hide ALL pay-on-delivery methods
+  // from the post-serve picker — they all mean "pay in person later" and
+  // showing them again would be confusing. Online methods (UPI / Card /
+  // Wallet / Net Banking) are still shown because the customer might want to
+  // pay online instead of settling in cash.
+  const hiddenMethodIds: string[] = (() => {
+    const chosenId = (order as any)?.paymentMethodId as string | null | undefined
+    const chosenType = (order as any)?.paymentMethod as string | null | undefined
+    if (!chosenId || !chosenType) return []
+    if (!['CASH', 'COUNTER', 'PAY_LATER'].includes(chosenType)) return []
+    // Customer chose a pay-on-delivery method → hide ALL pay-on-delivery
+    // methods (Cash + Counter + Pay Later) from the post-serve picker.
+    return (restaurant?.paymentMethods || [])
+      .filter((m) => ['CASH', 'COUNTER', 'PAY_LATER'].includes(m.type))
+      .map((m) => m.id)
+  })()
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50/40 via-white to-white pb-28">
       {/* ----- Sticky header ----- */}
@@ -561,6 +580,9 @@ export function OrderTracking({
         items={[]}
         existingOrderId={order.id}
         skipCustomerDetails
+        // Hide the pay-on-delivery method(s) the customer already chose at
+        // order placement — they shouldn't be asked to pick it again.
+        hiddenMethodIds={hiddenMethodIds}
         onCheckoutComplete={() => {
           setCheckoutOpen(false)
           qc.invalidateQueries({ queryKey: ['customer-order', orderId] })

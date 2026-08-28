@@ -245,6 +245,22 @@ export async function POST(req: NextRequest) {
   // reads to show a "Please pay" prompt).
   const initialStatus = 'NEW'
 
+  // Resolve the chosen payment-method row (if any) so we can snapshot both
+  // its ID and its `type` onto the order. The type is used by legacy code that
+  // reads `order.paymentMethod`; the ID is used by the post-serve payment
+  // picker to hide the same pay-on-delivery method the customer already chose.
+  let chosenPaymentMethod: { id: string; type: string } | null = null
+  if (input.paymentMethodId) {
+    const pm = await db.restaurantPaymentMethod.findUnique({
+      where: { id: input.paymentMethodId },
+      select: { id: true, type: true, restaurantId: true, active: true },
+    })
+    // Security: the method must belong to THIS restaurant and be active.
+    if (pm && pm.restaurantId === restaurant.id && pm.active) {
+      chosenPaymentMethod = { id: pm.id, type: pm.type }
+    }
+  }
+
   // Create order + items + modifiers + update table — in a transaction
   const created = await db.$transaction(async (tx) => {
     const order = await tx.order.create({
@@ -260,6 +276,8 @@ export async function POST(req: NextRequest) {
         customerPhone,
         status: initialStatus,
         paymentStatus: 'PENDING',
+        paymentMethod: chosenPaymentMethod?.type || null,
+        paymentMethodId: chosenPaymentMethod?.id || null,
         notes: input.notes || null,
         idempotencyKey: input.idempotencyKey,
         // Pre/post payment flags are set ONLY when staff manually requests

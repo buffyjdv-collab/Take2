@@ -33,6 +33,11 @@ export const createOrderSchema = z.object({
   }),
   idempotencyKey: z.string().min(8).max(120),
   notes: z.string().max(500).optional(),
+  /** Optional: ID of the RestaurantPaymentMethod row the customer chose at
+   *  checkout. Persisted on the Order so the post-serve payment picker can
+   *  hide the same pay-on-delivery method (Cash/Counter/Pay Later) if the
+   *  customer already picked it at placement time. */
+  paymentMethodId: z.string().optional().nullable(),
 })
 
 // Service request

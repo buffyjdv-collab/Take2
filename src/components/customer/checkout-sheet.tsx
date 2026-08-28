@@ -82,6 +82,11 @@ interface Props {
   /** Optional: hide the customer-details step (used when name/phone already
    *  recorded on the order). */
   skipCustomerDetails?: boolean
+  /** Optional: IDs of payment-method rows to HIDE from the picker. Used by
+   *  order-tracking to hide the "Pay on delivery" method the customer already
+   *  chose at order placement, so they're not asked to pick it again
+   *  post-serve. */
+  hiddenMethodIds?: string[]
 }
 
 type Step = 'details' | 'method' | 'upi_launch' | 'qr' | 'processing' | 'success' | 'error'
@@ -107,6 +112,7 @@ export function CheckoutSheet({
   onCheckoutComplete,
   existingOrderId,
   skipCustomerDetails,
+  hiddenMethodIds = [],
 }: Props) {
   const placeOrder = usePlaceOrder()
   const initiate = useInitiatePayment()
@@ -184,6 +190,10 @@ export function CheckoutSheet({
         name: customerName.trim(),
         phone: customerPhone.trim(),
       },
+      // Persist the chosen payment-method ID on the order so the post-serve
+      // picker can hide the same pay-on-delivery method if the customer picked
+      // one (Cash / Counter / Pay Later).
+      paymentMethodId: selectedMethod?.id || null,
     }
     const order = await placeOrder.mutateAsync(body)
     sessionStorage.removeItem('last-idem-key')
@@ -493,6 +503,8 @@ export function CheckoutSheet({
                     onSelect={(m) => setSelectedMethod(m)}
                     disabled={false}
                     recommendFirst
+                    selectedMethodId={selectedMethod?.id || null}
+                    hiddenMethodIds={hiddenMethodIds}
                   />
                   {availableMethods.length === 0 && (
                     <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">

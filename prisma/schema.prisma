@@ -493,6 +493,11 @@ model Order {
   paymentStatus String   @default("PENDING")
   // Payment method: UPI | CARD | CASH | COUNTER | WALLET
   paymentMethod String?
+  // ID of the RestaurantPaymentMethod row the customer chose at order placement.
+  // Used by the post-serve payment picker to hide the same option (e.g. "Pay in cash"
+  // already chosen — don't show it again). Null for legacy orders / when no method
+  // was recorded at placement time.
+  paymentMethodId String?
 
   // Special instructions from customer
   notes         String?
