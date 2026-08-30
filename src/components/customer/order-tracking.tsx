@@ -202,7 +202,7 @@ export function OrderTracking({
   })()
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-orange-50/40 via-white to-white pb-28">
+    <div className="min-h-screen bg-gradient-to-b from-orange-50/40 via-white to-white pb-44 sm:pb-28">
       {/* ----- Sticky header ----- */}
       <div className="sticky top-0 z-20 border-b border-orange-100/60 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">

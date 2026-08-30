@@ -36,7 +36,17 @@ interface NavItem {
   group?: 'platform' | 'restaurant'
 }
 
-const NAV: NavItem[] = [
+export type { NavItem }
+
+/**
+ * NAV
+ * Single source of truth for the admin/platform navigation. Reused by:
+ *  - <Sidebar>            (desktop sidebar + mobile drawer)
+ *  - <AdminBottomNav>     (mobile-only bottom tab bar)
+ *
+ * Order matters: the items appear here in the order they should be displayed.
+ */
+export const NAV: NavItem[] = [
   // Platform-level (super admin only)
   { key: 'platform-dashboard', label: 'Platform Overview', icon: Globe2, group: 'platform', permission: 'restaurants.manage' },
   { key: 'platform-restaurants', label: 'Tenants', icon: Building2, group: 'platform', permission: 'restaurants.manage' },

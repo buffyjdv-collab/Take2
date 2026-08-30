@@ -22,7 +22,13 @@ export function FloatingCartButton({ onClick }: { onClick: () => void }) {
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 100, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-        className="fixed inset-x-0 bottom-0 z-30"
+        // On mobile the customer bottom nav (h-14 = 56px) occupies the
+        // bottom of the screen, so this button is pushed up by 56px +
+        // safe-area. On md+ there's no bottom nav, so it stays at bottom-0.
+        className="fixed inset-x-0 bottom-14 z-30 md:bottom-0"
+        style={{
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
       >
         {/* Gradient overlay above the bar */}
         <div className="h-6 bg-gradient-to-t from-black/10 to-transparent" />

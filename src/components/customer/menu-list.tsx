@@ -166,7 +166,7 @@ export function MenuList({
   }, [categories, activeCategoryId, onActiveCategoryChange])
 
   return (
-    <main className="mx-auto max-w-3xl px-4 pb-36 pt-3">
+    <main className="mx-auto max-w-3xl px-4 pb-44 pt-3 sm:pb-36">
       {categories.map((cat) => {
         const catItems = items.filter((i) => i.category?.id === cat.id)
         if (catItems.length === 0) return null

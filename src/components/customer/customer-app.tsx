@@ -11,13 +11,14 @@ import { CartDrawer } from './cart-drawer'
 import { OrderTracking } from './order-tracking'
 import { BillView } from './bill-view'
 import { FloatingCartButton } from './floating-cart-button'
+import { CustomerBottomNav } from './customer-bottom-nav'
 import { Button } from '@/components/ui/button'
 import { Clock, Utensils, ChevronRight, Loader2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import type { MenuItemWithRelations } from './types'
 
-type View = 'menu' | 'cart' | 'checkout' | 'track' | 'bill'
+export type View = 'menu' | 'cart' | 'checkout' | 'track' | 'bill'
 
 export function CustomerApp({ token }: { token: string }) {
   const [view, setView] = useState<View>('menu')
@@ -227,7 +228,7 @@ export function CustomerApp({ token }: { token: string }) {
           onClick={() => {
             window.location.hash = 'track'
           }}
-          className="fixed bottom-20 right-4 z-30 flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-[13px] font-semibold text-orange-600 shadow-lg ring-1 ring-orange-100 transition-all hover:bg-orange-50 hover:shadow-xl active:scale-95"
+          className="fixed bottom-36 right-4 z-30 flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-[13px] font-semibold text-orange-600 shadow-lg ring-1 ring-orange-100 transition-all hover:bg-orange-50 hover:shadow-xl active:scale-95 md:hidden"
         >
           Track order
           <ChevronRight className="h-4 w-4" />
@@ -235,6 +236,28 @@ export function CustomerApp({ token }: { token: string }) {
       )}
 
       <FloatingCartButton onClick={() => setCartOpen(true)} />
+
+      {/* Mobile bottom tab bar — hidden on md+ where the top header + scroll menu suffice. */}
+      <CustomerBottomNav
+        view={view}
+        hasOrder={!!placedOrderId}
+        onNavigate={(v) => {
+          if (v === 'menu') {
+            setView('menu')
+            window.location.hash = ''
+          } else if (v === 'track') {
+            if (placedOrderId) {
+              setView('track')
+              window.location.hash = 'track'
+            }
+          } else if (v === 'bill') {
+            if (placedOrderId) {
+              setView('bill')
+              window.location.hash = 'bill'
+            }
+          }
+        }}
+      />
     </div>
   )
 }

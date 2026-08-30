@@ -21,6 +21,7 @@ import { PlatformUsersManager } from './platform/platform-users-manager'
 import { PlatformFeeConfig } from './platform/platform-fee-config'
 import { PlatformFeesCollected } from './platform/platform-fees-collected'
 import { PlatformRbacManager } from './platform/platform-rbac-manager'
+import { AdminBottomNav } from './admin/admin-bottom-nav'
 import { Menu as MenuIcon, BellRing } from 'lucide-react'
 import { useSocketEvent } from '@/hooks/use-socket'
 import { useQueryClient } from '@tanstack/react-query'
@@ -171,7 +172,7 @@ export function AppShell({ serverSession }: AppShellProps) {
           <div className="w-9" />
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto pb-[76px] md:pb-0">
           {hash === 'platform-dashboard' && (
             <PlatformDashboard onNavigate={(k) => { window.location.hash = k; setHash(k) }} />
           )}
@@ -193,6 +194,19 @@ export function AppShell({ serverSession }: AppShellProps) {
           {hash === 'staff' && <StaffManager />}
           {hash === 'settings' && <SettingsManager />}
         </main>
+
+        {/* Mobile bottom tab bar — hidden on md+ where the full sidebar is shown.
+            4 primary role-aware tabs + a "More" sheet containing every other
+            section the user can access. */}
+        <AdminBottomNav
+          role={role}
+          activeKey={hash}
+          restaurantName={restaurantName}
+          onNavigate={(key) => {
+            window.location.hash = key
+            setHash(key)
+          }}
+        />
       </div>
     </div>
   )
