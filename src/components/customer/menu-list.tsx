@@ -16,11 +16,17 @@ interface MenuListProps {
 
 /**
  * CategoryCarousel
- * Horizontal, finger-swipeable carousel of compact menu item cards. Items are
- * arranged in a 2-row grid that flows into columns (`grid-flow-col`), so each
- * "swipe" reveals the next column of two items — giving the "compact 2 rows"
- * layout the user asked for. Native `scroll-snap` provides the finger-friendly
- * momentum snapping on touch devices.
+ * Horizontal, finger-swipeable carousel of compact menu item cards laid out
+ * as **2 columns** — each viewport shows two cards side-by-side, with a small
+ * peek of the next card inviting a swipe. Native `scroll-snap` provides the
+ * finger-friendly momentum snapping on touch devices.
+ *
+ * Implementation notes:
+ *  - Outer container: `overflow-x-auto` + `scroll-snap-type: x mandatory`
+ *  - Inner: simple flex row, each card `basis-[46%] shrink-0 snap-start`
+ *    → 2 cards × 46% + gap-2.5 (10px) ≈ 92% of viewport, leaving an 8% peek
+ *  - `WebkitOverflowScrolling: touch` enables native momentum on iOS
+ *  - Scrollbars hidden for a clean look
  */
 function CategoryCarousel({
   id,
@@ -57,7 +63,7 @@ function CategoryCarousel({
   const scrollByPage = (dir: 'left' | 'right') => {
     const el = scrollRef.current
     if (!el) return
-    // Snap by ~2 columns worth of width so each tap advances one "page".
+    // Advance by roughly 2 card widths (= one "page" of 2 columns).
     const delta = el.clientWidth * 0.85
     el.scrollBy({
       left: dir === 'left' ? -delta : delta,
@@ -100,28 +106,26 @@ function CategoryCarousel({
 
       <div
         ref={scrollRef}
-        className="flex overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{
           scrollSnapType: 'x mandatory',
           WebkitOverflowScrolling: 'touch',
         }}
       >
-        <div
-          className="grid grid-flow-col auto-cols-[44%] grid-rows-2 gap-2.5 pr-3 sm:auto-cols-[200px]"
-          style={{ rowGap: '0.625rem' }}
-        >
-          {items.map((item, idx) => (
-            <motion.div
-              key={item.id}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(idx * 0.02, 0.15) }}
-              className="min-w-0"
-            >
-              <MenuItemCardCompact item={item} onSelect={() => onSelectItem(item.id)} />
-            </motion.div>
-          ))}
-        </div>
+        {items.map((item, idx) => (
+          <motion.div
+            key={item.id}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: Math.min(idx * 0.02, 0.15) }}
+            className="shrink-0 basis-[46%] snap-start sm:basis-[220px]"
+          >
+            <MenuItemCardCompact item={item} onSelect={() => onSelectItem(item.id)} />
+          </motion.div>
+        ))}
+        {/* Trailing spacer so the last card can snap to start without being
+            glued to the right edge of the viewport. */}
+        <div className="shrink-0 basis-2" aria-hidden="true" />
       </div>
     </div>
   )
