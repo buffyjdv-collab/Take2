@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { MenuSection } from './menu-item-card'
+import { ChevronLeft, ChevronRight, ChevronRight as ArrowRight } from 'lucide-react'
+import { MenuItemCardCompact } from './menu-item-card'
 import type { MenuItemWithRelations } from './types'
 
 interface MenuListProps {
@@ -11,6 +12,119 @@ interface MenuListProps {
   onSelectItem: (id: string) => void
   activeCategoryId: string
   onActiveCategoryChange: (id: string) => void
+}
+
+/**
+ * CategoryCarousel
+ * Horizontal, finger-swipeable carousel of compact menu item cards. Items are
+ * arranged in a 2-row grid that flows into columns (`grid-flow-col`), so each
+ * "swipe" reveals the next column of two items — giving the "compact 2 rows"
+ * layout the user asked for. Native `scroll-snap` provides the finger-friendly
+ * momentum snapping on touch devices.
+ */
+function CategoryCarousel({
+  id,
+  items,
+  onSelectItem,
+}: {
+  id: string
+  items: MenuItemWithRelations[]
+  onSelectItem: (id: string) => void
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [canLeft, setCanLeft] = useState(false)
+  const [canRight, setCanRight] = useState(false)
+
+  const updateScrollState = () => {
+    const el = scrollRef.current
+    if (!el) return
+    setCanLeft(el.scrollLeft > 4)
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+  }
+
+  useEffect(() => {
+    updateScrollState()
+    const el = scrollRef.current
+    if (!el) return
+    el.addEventListener('scroll', updateScrollState, { passive: true })
+    window.addEventListener('resize', updateScrollState)
+    return () => {
+      el.removeEventListener('scroll', updateScrollState)
+      window.removeEventListener('resize', updateScrollState)
+    }
+  }, [items.length])
+
+  const scrollByPage = (dir: 'left' | 'right') => {
+    const el = scrollRef.current
+    if (!el) return
+    // Snap by ~2 columns worth of width so each tap advances one "page".
+    const delta = el.clientWidth * 0.85
+    el.scrollBy({
+      left: dir === 'left' ? -delta : delta,
+      behavior: 'smooth',
+    })
+  }
+
+  return (
+    <div className="relative">
+      {/* Left edge fade */}
+      {canLeft && (
+        <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-6 bg-gradient-to-r from-slate-50 to-transparent" />
+      )}
+      {/* Right edge fade */}
+      {canRight && (
+        <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-6 bg-gradient-to-l from-slate-50 to-transparent" />
+      )}
+
+      {/* Left chevron (desktop / non-touch) */}
+      {canLeft && (
+        <button
+          onClick={() => scrollByPage('left')}
+          className="absolute -left-2 top-1/2 z-20 hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-slate-600 shadow-md ring-1 ring-slate-200 transition-colors hover:bg-slate-50 hover:text-slate-900 sm:flex"
+          aria-label="Scroll items left"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+      )}
+
+      {/* Right chevron */}
+      {canRight && (
+        <button
+          onClick={() => scrollByPage('right')}
+          className="absolute -right-2 top-1/2 z-20 hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-slate-600 shadow-md ring-1 ring-slate-200 transition-colors hover:bg-slate-50 hover:text-slate-900 sm:flex"
+          aria-label="Scroll items right"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      )}
+
+      <div
+        ref={scrollRef}
+        className="flex overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={{
+          scrollSnapType: 'x mandatory',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
+        <div
+          className="grid grid-flow-col auto-cols-[44%] grid-rows-2 gap-2.5 pr-3 sm:auto-cols-[200px]"
+          style={{ rowGap: '0.625rem' }}
+        >
+          {items.map((item, idx) => (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(idx * 0.02, 0.15) }}
+              className="min-w-0"
+            >
+              <MenuItemCardCompact item={item} onSelect={() => onSelectItem(item.id)} />
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function MenuList({
@@ -60,29 +174,39 @@ export function MenuList({
             ref={(el) => {
               sectionRefs.current[cat.id] = el
             }}
-            className="mb-2 scroll-mt-[108px]"
+            className="mb-5 scroll-mt-[108px]"
           >
-            <div className="mb-3 mt-4">
-              <h2 className="text-[20px] font-extrabold tracking-tight text-slate-900">
-                {cat.icon && <span className="mr-1.5">{cat.icon}</span>}
-                {cat.name}
-                <span className="ml-2 text-[13px] font-medium text-slate-400">
-                  ({catItems.length})
+            {/* Category header */}
+            <div className="mb-2.5 mt-3 flex items-end justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="flex items-center gap-1.5 text-[19px] font-extrabold tracking-tight text-slate-900">
+                  {cat.icon && <span className="text-base">{cat.icon}</span>}
+                  <span className="truncate">{cat.name}</span>
+                  <span className="ml-1 text-[12px] font-medium text-slate-400">
+                    {catItems.length}
+                  </span>
+                </h2>
+                {cat.description && (
+                  <p className="mt-0.5 line-clamp-1 text-[12px] text-slate-500">
+                    {cat.description}
+                  </p>
+                )}
+              </div>
+              {/* Subtle "swipe →" hint — only shown on touch when there are enough items */}
+              {catItems.length > 2 && (
+                <span className="hidden shrink-0 items-center gap-0.5 text-[11px] font-medium text-slate-400 sm:flex">
+                  Swipe
+                  <ArrowRight className="h-3 w-3" />
                 </span>
-              </h2>
+              )}
             </div>
-            <div className="flex flex-col">
-              {catItems.map((item, idx) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(idx * 0.03, 0.2) }}
-                >
-                  <MenuSection item={item} onSelect={() => onSelectItem(item.id)} />
-                </motion.div>
-              ))}
-            </div>
+
+            {/* Swipeable carousel */}
+            <CategoryCarousel
+              id={cat.id}
+              items={catItems}
+              onSelectItem={onSelectItem}
+            />
           </section>
         )
       })}

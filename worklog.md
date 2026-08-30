@@ -545,3 +545,64 @@ Stage Summary:
 - API contract for /api/platform/fees was NOT changed — only the new overdueTenants field is consumed. The /api/platform/restaurants GET response gained three new fields (platformFeeBlocked, platformFeeBlockedAt, platformFeeBlockReason) which are purely additive
 - Files changed: 3 (1 API route + 2 UI components)
 
+
+---
+Task ID: QR-MENU-UX-REDUX
+Agent: Main (Super Z)
+Task: QR customer menu — compact 2-row swipeable category items + polished restaurant name / background UI
+
+Work Log:
+- Cloned https://github.com/buffyjdv-collab/Take2.git → /home/z/my-project/take2
+- Read existing customer flow: customer-app.tsx, restaurant-header.tsx, category-tabs.tsx, menu-list.tsx, menu-item-card.tsx, types.ts, customer/menu/route.ts, globals.css, package.json
+- Confirmed `embla-carousel-react` is installed but chose native `overflow-x-auto + scroll-snap-type: x mandatory` for the swipeable carousel — better touch fidelity on iOS (momentum scrolling via `WebkitOverflowScrolling: touch`) and zero JS overhead
+- Confirmed restaurant payload includes `primaryColor`, `accentColor`, `logo`, `tagline`, `description` — all needed for the new hero
+- Confirmed `MenuSection` and `RestaurantHeader` are only consumed in `menu-list.tsx` / `customer-app.tsx` respectively — safe to refactor without ripple effects
+
+Changes:
+
+1. src/components/customer/restaurant-header.tsx (FULL REWRITE)
+   * Split into two layers:
+     - Sticky top bar (h-[57px], same height as before so CategoryTabs' `top-[57px]` offset still lines up). Transparent over the hero, becomes frosted white (`bg-white/85 backdrop-blur-xl`) once `window.scrollY > 8`. Contains back button, table/dine-in line (or collapsed restaurant name when scrolled), search, cart-with-badge
+     - Hero block below: brand-gradient background (`linear-gradient(135deg, primaryColor → accentColor)`, falls back to orange-600/orange-500 when colours are unset). Decorative radial-highlight overlay + dotted texture overlay (12% opacity). Bottom fade-to-transparent for smooth handoff into the page body
+   * Hero content: 64×64 rounded-2xl logo tile (or initials avatar in `primaryColor` if no logo), large restaurant name (22px mobile / 26px sm, extrabold, drop-shadow), tagline (1-line clamp, 13px), info chips row (Table / Open hours / "Open now" emerald pill / Dine-in star), and a 2-line description block when present
+   * `<header>` intentionally left `position: static` (NOT `relative`) so the sticky top bar's containing block is the outer page wrapper — it stays pinned for the entire scroll height instead of scrolling away with the hero
+   * Added `resolveBrand()` helper — safely coerces the restaurant's primary/accent colour string into a CSS-valid value, falling back to orange-600 / orange-500
+
+2. src/components/customer/menu-item-card.tsx
+   * Extracted shared cart logic into `useItemCartState(item, onSelect)` hook — used by both `MenuSection` (existing full-width row layout, unchanged externally) and the new `MenuItemCardCompact`
+   * Added new `MenuItemCardCompact` export — vertical card designed for the swipeable carousel:
+     - `aspect-[5/4]` image (or gradient + 🍽️ emoji placeholder)
+     - Top-left overlay stack: VegBadge in white pill, Popular badge (yellow), Spicy flame icon
+     - Sold-out overlay: frosted white with "Sold out" pill
+     - Quick-add: circular 36px white button at bottom-right of image (or 36px-tall rounded-full qty counter `[- N +]` when in cart) — both with framer-motion spring entrance
+     - Body: 2-line clamp name (13px semibold), price (sm) + "· sizes" hint when variants exist
+     - Width is controlled by the parent grid column (`auto-cols-[44%]` mobile / `200px` sm), so two cards fit per mobile viewport
+   * Removed unused `eslint-disable @next/next/no-img-element` directives (rule isn't enabled in this project)
+
+3. src/components/customer/menu-list.tsx (FULL REWRITE)
+   * Per-category layout changed from a single vertical list of full-width rows to a horizontal swipeable carousel of compact cards
+   * New `CategoryCarousel` component:
+     - Outer `overflow-x-auto` container with `scroll-snap-type: x mandatory`, `WebkitOverflowScrolling: touch`, hidden scrollbars (`[scrollbar-width:none] [&::-webkit-scrollbar]:hidden`)
+     - Inner `grid grid-flow-col grid-rows-2 auto-cols-[44%] gap-2.5` on mobile (each column is 44% of viewport width — exactly 2 cards visible per "page" with a peek of the third inviting a swipe). On `sm+`, columns widen to fixed `200px`
+     - `grid-rows-2 grid-flow-col` means items fill column 1 (rows 1+2), then column 2 (rows 1+2), etc. — so each "swipe" reveals the next column of two items. This is the "compact 2 rows" layout the user asked for
+     - Edge fade gradients (left/right) appear when scrollable
+     - Optional desktop chevron buttons (hidden on mobile, where swipe is the primary interaction) scroll by 85% of viewport width per tap
+     - Cards animate in with staggered fade-up (max delay 150ms)
+   * Category header redesigned: 19px extrabold title with optional icon + count, optional description (1-line clamp), and a "Swipe →" hint on sm+ when category has >2 items
+   * IntersectionObserver logic preserved unchanged — scrolling the page still auto-highlights the matching category tab
+   * Kept `scroll-mt-[108px]` on each section so anchor jumps still clear the sticky bar + tabs
+
+4. No changes needed to customer-app.tsx, category-tabs.tsx, or the customer menu API route — all existing contracts preserved. The outer `min-h-screen bg-white` wrapper in customer-app.tsx is `position: static`, so the new sticky top bar pins correctly for the whole page.
+
+Verification:
+- `npx tsc --noEmit` on the three modified files → ZERO TypeScript errors (the 13 remaining tsc errors in the repo are all pre-existing in unrelated files: qr route, signup, platform metrics, bill-view, platform-fee.ts, etc.)
+- `npx eslint` on the three modified files → ZERO errors, ZERO warnings
+- `bun run dev` → server started cleanly, `GET /` returned 200 (compile 18s, render 655ms), `GET /?table=test-token` returned 200 (compile 10ms, render 62ms) — CustomerApp compiles and renders without errors
+- Sticky offset chain verified: top bar (57px) → CategoryTabs (top-[57px]) → menu sections (scroll-mt-[108px]) all line up
+
+Stage Summary:
+- Restaurant header is now a two-layer "hero + sticky bar" design: a brand-coloured gradient hero with logo / name / tagline / table / hours / open-now pill that scrolls away, plus a 57px sticky top bar that goes transparent→frosted-white on scroll. Backdrop-blur keeps the restaurant name legible whether over the hero or the page content
+- Each category's items now render in a horizontal finger-swipeable 2-row grid carousel. Two compact vertical cards are visible per mobile viewport (44% column width), with a peek of the next column inviting a swipe. scroll-snap-type:x mandatory + WebkitOverflowScrolling:touch give true momentum-snapping finger swipe on iOS/Android. Desktop gets left/right chevron buttons that page by 85% of viewport
+- New compact card (`MenuItemCardCompact`): image with overlaid veg/popular/spicy badges, circular quick-add button at image bottom-right that swaps to a `[- N +]` rounded-full counter when the item is in cart, 2-line name, price + variants hint. Cart state is shared with the existing `MenuSection` via the new `useItemCartState` hook — single source of truth, no behavioural drift between the two card variants
+- All existing functionality preserved: IntersectionObserver auto-highlights tabs on scroll, quick-add skips to item detail sheet when variants/required modifiers exist, sold-out items are non-interactive, hash-based view switching (menu/track/bill) unchanged, FloatingCartButton and ItemDetailSheet untouched
+- Files changed: 3 (restaurant-header.tsx full rewrite, menu-list.tsx full rewrite, menu-item-card.tsx additive — new helper hook + new component, existing MenuSection externally unchanged)
