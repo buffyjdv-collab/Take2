@@ -9,7 +9,7 @@ const geistSans = Geist({
 })
 
 export const metadata: Metadata = {
-  title: 'QR Dine — Restaurant Quick-Order SaaS',
+  title: 'QUICK QR — Restaurant Quick-Order SaaS',
   description:
     'Scan-to-order restaurant platform: real-time kitchen display, billing, reports, and QR table ordering.',
   keywords: ['QR ordering', 'restaurant', 'SaaS', 'kitchen display'],
