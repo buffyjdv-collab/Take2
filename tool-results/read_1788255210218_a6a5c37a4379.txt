@@ -1,0 +1,612 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→/**
+     4→     4→ * Zepto-style order tracking page.
+     5→     5→ *
+     6→     6→ * Layout (top to bottom):
+     7→     7→ *   1. Sticky translucent header     — order #, status badge, back button
+     8→     8→ *   2. Hero status card               — big current status + ETA + animated icon
+     9→     9→ *   3. Horizontal progress stepper    — Zepto-style pill timeline with icons
+    10→    10→ *   4. Order items card                — items + qty + price, collapsible bill details
+    11→    11→ *   5. Payment-CTA card (conditional)  — "Pay ₹X" CTA when payment is due
+    12→    12→ *   6. Sticky bottom action bar       — primary CTA (Proceed to bill / Pay / Done)
+    13→    13→ *
+    14→    14→ * CRITICAL: All React Hooks (useState, useEffect, useSocketEvent) must be
+    15→    15→ * declared BEFORE any early return. A previous version had the auto-open
+    16→    16→ * useEffect AFTER the `if (isLoading || !order) return` check, which caused
+    17→    17→ * React to throw "Rendered more hooks than during the previous render" —
+    18→    18→ * this was the actual reason the tracking page wouldn't load.
+    19→    19→ */
+    20→    20→import { useState, useEffect } from 'react'
+    21→    21→import { useCustomerOrder, useCancelOrder } from '@/hooks/api'
+    22→    22→import { useSocketEvent } from '@/hooks/use-socket'
+    23→    23→import { useQueryClient } from '@tanstack/react-query'
+    24→    24→import { Button } from '@/components/ui/button'
+    25→    25→import { OrderStatusBadge } from '@/components/restaurant/order-status-badge'
+    26→    26→import { PaymentStatusBadge } from '@/components/restaurant/payment-status-badge'
+    27→    27→import { LoadingSpinner } from '@/components/restaurant/loading-states'
+    28→    28→import { formatINR } from '@/components/restaurant/price'
+    29→    29→import {
+    30→    30→  BellRing,
+    31→    31→  CheckCircle2,
+    32→    32→  Clock,
+    33→    33→  ChefHat,
+    34→    34→  PackageCheck,
+    35→    35→  Utensils,
+    36→    36→  XCircle,
+    37→    37→  CreditCard,
+    38→    38→  ArrowRight,
+    39→    39→  ArrowLeft,
+    40→    40→  MapPin,
+    41→    41→  ChevronDown,
+    42→    42→  Receipt,
+    43→    43→  Sparkles,
+    44→    44→  type LucideIcon,
+    45→    45→} from 'lucide-react'
+    46→    46→import { toast } from 'sonner'
+    47→    47→import { motion, AnimatePresence } from 'framer-motion'
+    48→    48→import { cn } from '@/lib/utils'
+    49→    49→import { VegBadge } from '@/components/restaurant/veg-badge'
+    50→    50→import type { OrderStatus } from '@/lib/types'
+    51→    51→import type { RestaurantInfo } from './types'
+    52→    52→import { CheckoutSheet } from './checkout-sheet'
+    53→    53→import { HIDE_POST_SERVE_TYPES, PAY_ON_DELIVERY_TYPES } from './payment-method-picker'
+    54→    54→
+    55→    55→// ---------------------------------------------------------------------------
+    56→    56→// Status config — drives the hero card + stepper
+    57→    57→// ---------------------------------------------------------------------------
+    58→    58→interface StepConfig {
+    59→    59→  key: OrderStatus
+    60→    60→  label: string
+    61→    61→  shortLabel: string
+    62→    62→  sublabel: string
+    63→    63→  icon: LucideIcon
+    64→    64→  etaText?: string
+    65→    65→}
+    66→    66→
+    67→    67→const STEPS: StepConfig[] = [
+    68→    68→  { key: 'NEW', label: 'Order Placed', shortLabel: 'Placed', sublabel: 'Waiting for restaurant to accept', icon: CheckCircle2, etaText: '~20-25 min' },
+    69→    69→  { key: 'ACCEPTED', label: 'Confirmed', shortLabel: 'Confirmed', sublabel: 'Restaurant has accepted your order', icon: BellRing, etaText: '~15-20 min' },
+    70→    70→  { key: 'PREPARING', label: 'Preparing', shortLabel: 'Cooking', sublabel: 'The chef is preparing your food', icon: ChefHat, etaText: '~10-15 min' },
+    71→    71→  { key: 'READY', label: 'Ready to Serve', shortLabel: 'Ready', sublabel: 'Your food is ready for serving', icon: PackageCheck, etaText: '~2-5 min' },
+    72→    72→  { key: 'SERVED', label: 'Served', shortLabel: 'Served', sublabel: 'Enjoy your meal!', icon: Utensils, etaText: 'Enjoy!' },
+    73→    73→]
+    74→    74→
+    75→    75→function stepIndex(status: string): number {
+    76→    76→  const order: string[] = ['NEW', 'ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'COMPLETED']
+    77→    77→  const i = order.indexOf(status)
+    78→    78→  if (i < 0) return -1
+    79→    79→  return Math.min(i, STEPS.length - 1)
+    80→    80→}
+    81→    81→
+    82→    82→// ---------------------------------------------------------------------------
+    83→    83→// Component
+    84→    84→// ---------------------------------------------------------------------------
+    85→    85→export function OrderTracking({
+    86→    86→  orderId,
+    87→    87→  restaurant,
+    88→    88→  onBackToMenu,
+    89→    89→  onProceedToBill,
+    90→    90→}: {
+    91→    91→  orderId: string
+    92→    92→  restaurant?: RestaurantInfo
+    93→    93→  onBackToMenu: () => void
+    94→    94→  onProceedToBill: () => void
+    95→    95→}) {
+    96→    96→  const qc = useQueryClient()
+    97→    97→  const { data: order, isLoading } = useCustomerOrder(orderId)
+    98→    98→  const cancel = useCancelOrder()
+    99→    99→  const [checkoutOpen, setCheckoutOpen] = useState(false)
+   100→   100→  const [postPayPrompted, setPostPayPrompted] = useState(false)
+   101→   101→  const [billExpanded, setBillExpanded] = useState(false)
+   102→   102→
+   103→   103→  // ---- Socket subscriptions (always called, regardless of loading state) ----
+   104→   104→  useSocketEvent('order:updated', (payload: any) => {
+   105→   105→    if (payload?.orderId === orderId) {
+   106→   106→      qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+   107→   107→    }
+   108→   108→  })
+   109→   109→  useSocketEvent('order:statusChanged', (payload: any) => {
+   110→   110→    if (payload?.orderId === orderId) {
+   111→   111→      qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+   112→   112→      toast.success(`Order status: ${payload.status}`)
+   113→   113→    }
+   114→   114→  })
+   115→   115→  useSocketEvent('payment:confirmed', (payload: any) => {
+   116→   116→    if (payload?.orderId === orderId) {
+   117→   117→      qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+   118→   118→      toast.success('Payment confirmed!')
+   119→   119→    }
+   120→   120→  })
+   121→   121→  useSocketEvent('payment:requested', (payload: any) => {
+   122→   122→    if (payload?.orderId === orderId) {
+   123→   123→      qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+   124→   124→      const when = payload.when === 'PRE' ? 'before we accept your order' : 'now that your order is received'
+   125→   125→      toast.info(`Payment requested: please pay ${when}.`, {
+   126→   126→        description: `Amount: ₹${(payload.amount || 0).toFixed(0)}`,
+   127→   127→      })
+   128→   128→    }
+   129→   129→  })
+   130→   130→
+   131→   131→  // ---- Derived state (safe to compute even if order is undefined) ----
+   132→   132→  const isPaid = order?.paymentStatus === 'PAID'
+   133→   133→  const isCompleted = order?.status === 'COMPLETED'
+   134→   134→  const isPendingPayment = order?.status === 'PENDING_PAYMENT'
+   135→   135→  const isServed = order?.status === 'SERVED'
+   136→   136→  const needsToPay =
+   137→   137→    !!order &&
+   138→   138→    !isPaid &&
+   139→   139→    (isPendingPayment || !!order.prePaymentRequested || !!order.postPaymentRequested)
+   140→   140→
+   141→   141→  // ---- Auto-open the checkout sheet once when order is SERVED ----
+   142→   142→  // (Zepto-style post-meal payment prompt). MUST be before any early return.
+   143→   143→  useEffect(() => {
+   144→   144→    if (
+   145→   145→      isServed &&
+   146→   146→      !isPaid &&
+   147→   147→      !postPayPrompted &&
+   148→   148→      !sessionStorage.getItem(`postpay-popup-${orderId}`)
+   149→   149→    ) {
+   150→   150→      setCheckoutOpen(true)
+   151→   151→      sessionStorage.setItem(`postpay-popup-${orderId}`, 'shown')
+   152→   152→      setPostPayPrompted(true)
+   153→   153→    }
+   154→   154→  }, [isServed, isPaid, orderId, postPayPrompted])
+   155→   155→
+   156→   156→  // ---- Loading state (only AFTER all hooks are declared) ----
+   157→   157→  if (isLoading || !order) {
+   158→   158→    return (
+   159→   159→      <div className="flex min-h-[70vh] items-center justify-center bg-gradient-to-b from-orange-50/40 to-white">
+   160→   160→        <div className="text-center">
+   161→   161→          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50">
+   162→   162→            <ChefHat className="h-7 w-7 text-orange-500 animate-pulse" />
+   163→   163→          </div>
+   164→   164→          <p className="text-[14px] font-semibold text-slate-700">Loading your order…</p>
+   165→   165→          <p className="mt-1 text-[12px] text-slate-400">Just a moment</p>
+   166→   166→        </div>
+   167→   167→      </div>
+   168→   168→    )
+   169→   169→  }
+   170→   170→
+   171→   171→  // ---- Now safe to use order (loaded) ----
+   172→   172→  const curStep = stepIndex(order.status)
+   173→   173→  const canCancel = order.status === 'NEW' || order.status === 'PENDING_PAYMENT'
+   174→   174→  const canRequestBill = ['SERVED', 'READY'].includes(order.status) && order.paymentStatus !== 'PAID'
+   175→   175→  const currentStepConfig = STEPS[Math.max(curStep, 0)]
+   176→   176→  const etaText = isCompleted ? null : currentStepConfig?.etaText
+   177→   177→  const HeroIcon = currentStepConfig?.icon || Clock
+   178→   178→  const itemCount = order.items?.length || 0
+   179→   179→
+   180→   180→  // Compute which payment-method IDs to hide from the post-serve picker.
+   181→   181→  //
+   182→   182→  // Rule: when the customer already chose a pay-on-delivery method at order
+   183→   183→  // placement, hide Counter + Pay Later (those mean "pay at counter / settle
+   184→   184→  // later" — they'd be confusing to show again post-serve). KEEP Cash visible
+   185→   185→  // because the waiter can still collect cash at the table — and keep all the
+   186→   186→  // online methods (UPI / QR / Card / Wallet / Net Banking) so the customer
+   187→   187→  // can switch to paying online if they prefer.
+   188→   188→  //
+   189→   189→  // Net effect on the post-serve picker when customer chose pay-on-delivery:
+   190→   190→  //   ✅ UPI   ✅ Scan QR   ✅ Card   ✅ Wallet   ✅ Net Banking   ✅ Cash
+   191→   191→  //   ❌ Pay at Counter   ❌ Pay Later
+   192→   192→  const hiddenMethodIds: string[] = (() => {
+   193→   193→    const chosenId = (order as any)?.paymentMethodId as string | null | undefined
+   194→   194→    const chosenType = (order as any)?.paymentMethod as string | null | undefined
+   195→   195→    if (!chosenId || !chosenType) return []
+   196→   196→    if (!PAY_ON_DELIVERY_TYPES.includes(chosenType)) return []
+   197→   197→    // Customer chose a pay-on-delivery method → hide only COUNTER + PAY_LATER
+   198→   198→    // (Cash stays visible — waiter can still collect cash at the table).
+   199→   199→    return (restaurant?.paymentMethods || [])
+   200→   200→      .filter((m) => HIDE_POST_SERVE_TYPES.includes(m.type))
+   201→   201→      .map((m) => m.id)
+   202→   202→  })()
+   203→   203→
+   204→   204→  return (
+   205→   205→    <div className="min-h-screen bg-gradient-to-b from-orange-50/40 via-white to-white pb-44 sm:pb-28">
+   206→   206→      {/* ----- Sticky header ----- */}
+   207→   207→      <div className="sticky top-0 z-20 border-b border-orange-100/60 bg-white/80 backdrop-blur-md">
+   208→   208→        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
+   209→   209→          <button
+   210→   210→            onClick={onBackToMenu}
+   211→   211→            className="-ml-1 flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+   212→   212→            aria-label="Back to menu"
+   213→   213→          >
+   214→   214→            <ArrowLeft className="h-5 w-5" />
+   215→   215→          </button>
+   216→   216→          <div className="flex-1">
+   217→   217→            <div className="flex items-center gap-2">
+   218→   218→              <h1 className="text-[16px] font-extrabold tracking-tight text-slate-900">
+   219→   219→                {order.orderNumber}
+   220→   220→              </h1>
+   221→   221→              <OrderStatusBadge status={order.status} />
+   222→   222→            </div>
+   223→   223→            <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-slate-400">
+   224→   224→              <MapPin className="h-3 w-3" />
+   225→   225→              <span>Table {order.table?.number} · Dine-in</span>
+   226→   226→              <span className="mx-0.5">·</span>
+   227→   227→              <PaymentStatusBadge status={order.paymentStatus} />
+   228→   228→            </div>
+   229→   229→          </div>
+   230→   230→        </div>
+   231→   231→      </div>
+   232→   232→
+   233→   233→      <div className="mx-auto max-w-2xl px-4 pt-4">
+   234→   234→        {/* ----- Hero status card (Zepto-style big card) ----- */}
+   235→   235→        <motion.div
+   236→   236→          initial={{ y: 12, opacity: 0 }}
+   237→   237→          animate={{ y: 0, opacity: 1 }}
+   238→   238→          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+   239→   239→          className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-orange-50/30 p-5 shadow-sm"
+   240→   240→        >
+   241→   241→          {/* Decorative glow */}
+   242→   242→          <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-orange-200/30 blur-3xl" />
+   243→   243→
+   244→   244→          <div className="relative flex items-start justify-between">
+   245→   245→            <div className="flex-1">
+   246→   246→              <p className="text-[12px] font-bold uppercase tracking-wider text-orange-600">
+   247→   247→                {isCompleted ? 'Order Complete' : 'Status'}
+   248→   248→              </p>
+   249→   249→              <h2 className="mt-1 text-[24px] font-extrabold leading-tight text-slate-900">
+   250→   250→                {isCompleted ? 'All done!' : currentStepConfig?.label || 'Processing'}
+   251→   251→              </h2>
+   252→   252→              <p className="mt-1 text-[13px] text-slate-500">
+   253→   253→                {currentStepConfig?.sublabel}
+   254→   254→              </p>
+   255→   255→
+   256→   256→              {etaText && !isCompleted && (
+   257→   257→                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-orange-700 shadow-sm ring-1 ring-orange-100">
+   258→   258→                  <Clock className="h-3.5 w-3.5" />
+   259→   259→                  ETA {etaText}
+   260→   260→                </div>
+   261→   261→              )}
+   262→   262→            </div>
+   263→   263→
+   264→   264→            {/* Animated status icon */}
+   265→   265→            <motion.div
+   266→   266→              initial={{ scale: 0.8, rotate: -5 }}
+   267→   267→              animate={{ scale: 1, rotate: 0 }}
+   268→   268→              transition={{ type: 'spring', stiffness: 300, damping: 18, delay: 0.1 }}
+   269→   269→              className={cn(
+   270→   270→                'flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl shadow-md',
+   271→   271→                isCompleted ? 'bg-green-100' : 'bg-orange-500',
+   272→   272→              )}
+   273→   273→            >
+   274→   274→              <HeroIcon
+   275→   275→                className={cn('h-8 w-8', isCompleted ? 'text-green-600' : 'text-white')}
+   276→   276→                strokeWidth={2.25}
+   277→   277→              />
+   278→   278→            </motion.div>
+   279→   279→          </div>
+   280→   280→        </motion.div>
+   281→   281→
+   282→   282→        {/* ----- Horizontal progress stepper (Zepto-style) ----- */}
+   283→   283→        <motion.div
+   284→   284→          initial={{ y: 12, opacity: 0 }}
+   285→   285→          animate={{ y: 0, opacity: 1 }}
+   286→   286→          transition={{ duration: 0.4, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+   287→   287→          className="mt-4 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm"
+   288→   288→        >
+   289→   289→          <div className="flex items-center justify-between">
+   290→   290→            {STEPS.map((step, idx) => {
+   291→   291→              const Icon = step.icon
+   292→   292→              const isActive = idx === curStep
+   293→   293→              const isDone = idx < curStep
+   294→   294→              const isLast = idx === STEPS.length - 1
+   295→   295→
+   296→   296→              return (
+   297→   297→                <div key={step.key} className="flex flex-1 items-center">
+   298→   298→                  {/* Step circle */}
+   299→   299→                  <div className="flex flex-col items-center gap-1">
+   300→   300→                    <motion.div
+   301→   301→                      initial={false}
+   302→   302→                      animate={{
+   303→   303→                        scale: isActive ? 1.12 : 1,
+   304→   304→                        backgroundColor: isDone || isActive ? '#ea580c' : '#f1f5f9',
+   305→   305→                      }}
+   306→   306→                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+   307→   307→                      className={cn(
+   308→   308→                        'flex h-9 w-9 items-center justify-center rounded-full ring-2 transition-colors',
+   309→   309→                        isActive ? 'ring-orange-200' : 'ring-transparent',
+   310→   310→                      )}
+   311→   311→                    >
+   312→   312→                      {isDone ? (
+   313→   313→                        <CheckCircle2 className="h-5 w-5 text-white" strokeWidth={2.5} />
+   314→   314→                      ) : (
+   315→   315→                        <Icon
+   316→   316→                          className={cn(
+   317→   317→                            'h-4 w-4',
+   318→   318→                            isActive ? 'text-white' : 'text-slate-400',
+   319→   319→                          )}
+   320→   320→                          strokeWidth={isActive ? 2.5 : 1.75}
+   321→   321→                        />
+   322→   322→                      )}
+   323→   323→                    </motion.div>
+   324→   324→                    <span
+   325→   325→                      className={cn(
+   326→   326→                        'text-[10px] font-semibold tracking-wide',
+   327→   327→                        isActive ? 'text-orange-600' : isDone ? 'text-slate-700' : 'text-slate-400',
+   328→   328→                      )}
+   329→   329→                    >
+   330→   330→                      {step.shortLabel}
+   331→   331→                    </span>
+   332→   332→                  </div>
+   333→   333→
+   334→   334→                  {/* Connecting line */}
+   335→   335→                  {!isLast && (
+   336→   336→                    <div className="mx-1 mb-5 h-1 flex-1 overflow-hidden rounded-full bg-slate-100">
+   337→   337→                      <motion.div
+   338→   338→                        initial={false}
+   339→   339→                        animate={{ width: isDone ? '100%' : '0%' }}
+   340→   340→                        transition={{ duration: 0.5, ease: 'easeInOut' }}
+   341→   341→                        className="h-full bg-gradient-to-r from-orange-400 to-orange-500"
+   342→   342→                      />
+   343→   343→                    </div>
+   344→   344→                  )}
+   345→   345→                </div>
+   346→   346→              )
+   347→   347→            })}
+   348→   348→          </div>
+   349→   349→        </motion.div>
+   350→   350→
+   351→   351→        {/* ----- Payment-CTA card (Zepto-style — shows when payment is due) ----- */}
+   352→   352→        <AnimatePresence>
+   353→   353→          {needsToPay && (
+   354→   354→            <motion.div
+   355→   355→              initial={{ y: 12, opacity: 0, height: 0 }}
+   356→   356→              animate={{ y: 0, opacity: 1, height: 'auto' }}
+   357→   357→              exit={{ y: 8, opacity: 0, height: 0 }}
+   358→   358→              transition={{ duration: 0.3 }}
+   359→   359→              className="mt-4 overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 shadow-sm"
+   360→   360→            >
+   361→   361→              <div className="p-4">
+   362→   362→                <div className="mb-1 flex items-center gap-2">
+   363→   363→                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100">
+   364→   364→                    <CreditCard className="h-4 w-4 text-amber-700" />
+   365→   365→                  </div>
+   366→   366→                  <h3 className="text-[14px] font-bold text-amber-900">
+   367→   367→                    {isPendingPayment || order.prePaymentRequested
+   368→   368→                      ? 'Please pay to confirm'
+   369→   369→                      : 'Settle your bill'}
+   370→   370→                  </h3>
+   371→   371→                </div>
+   372→   372→                <p className="mb-3 text-[12.5px] text-amber-700/90">
+   373→   373→                  {isPendingPayment || order.prePaymentRequested
+   374→   374→                    ? 'Your order goes to the kitchen once payment is confirmed.'
+   375→   375→                    : 'Please settle the bill before leaving.'}
+   376→   376→                </p>
+   377→   377→                <div className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm">
+   378→   378→                  <span className="text-[13px] font-medium text-slate-600">Amount due</span>
+   379→   379→                  <span className="text-[18px] font-extrabold text-slate-900">
+   380→   380→                    {formatINR(order.grandTotal)}
+   381→   381→                  </span>
+   382→   382→                </div>
+   383→   383→              </div>
+   384→   384→            </motion.div>
+   385→   385→          )}
+   386→   386→        </AnimatePresence>
+   387→   387→
+   388→   388→        {/* ----- Order items card ----- */}
+   389→   389→        <motion.div
+   390→   390→          initial={{ y: 12, opacity: 0 }}
+   391→   391→          animate={{ y: 0, opacity: 1 }}
+   392→   392→          transition={{ duration: 0.4, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
+   393→   393→          className="mt-4 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm"
+   394→   394→        >
+   395→   395→          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+   396→   396→            <h3 className="text-[14px] font-bold text-slate-800">
+   397→   397→              Your order
+   398→   398→              <span className="ml-1.5 text-[12px] font-medium text-slate-400">
+   399→   399→                ({itemCount} item{itemCount !== 1 ? 's' : ''})
+   400→   400→              </span>
+   401→   401→            </h3>
+   402→   402→            <span className="text-[13px] font-bold text-slate-700">
+   403→   403→              {formatINR(order.grandTotal)}
+   404→   404→            </span>
+   405→   405→          </div>
+   406→   406→
+   407→   407→          <div className="divide-y divide-slate-50">
+   408→   408→            {order.items?.map((it: any) => (
+   409→   409→              <div key={it.id} className="flex items-start gap-2.5 px-4 py-3">
+   410→   410→                <div className="mt-0.5">
+   411→   411→                  <VegBadge isVeg={it.isVeg} />
+   412→   412→                </div>
+   413→   413→                <div className="min-w-0 flex-1">
+   414→   414→                  <p className="text-[13.5px] font-semibold text-slate-800">
+   415→   415→                    {it.menuItemName}
+   416→   416→                  </p>
+   417→   417→                  {it.variantName && (
+   418→   418→                    <p className="mt-0.5 text-[11.5px] text-slate-400">{it.variantName}</p>
+   419→   419→                  )}
+   420→   420→                  {it.modifiers?.length > 0 && (
+   421→   421→                    <p className="mt-0.5 truncate text-[11.5px] text-slate-400">
+   422→   422→                      + {it.modifiers.map((m: any) => m.modifierName).join(', ')}
+   423→   423→                    </p>
+   424→   424→                  )}
+   425→   425→                </div>
+   426→   426→                <div className="shrink-0 text-right">
+   427→   427→                  <p className="text-[12px] text-slate-400">
+   428→   428→                    {it.quantity} × {formatINR(it.unitPrice || it.totalPrice / it.quantity)}
+   429→   429→                  </p>
+   430→   430→                  <p className="text-[13.5px] font-bold text-slate-900">
+   431→   431→                    {formatINR(it.totalPrice)}
+   432→   432→                  </p>
+   433→   433→                </div>
+   434→   434→              </div>
+   435→   435→            ))}
+   436→   436→          </div>
+   437→   437→
+   438→   438→          {/* Bill details — collapsible */}
+   439→   439→          <button
+   440→   440→            onClick={() => setBillExpanded((v) => !v)}
+   441→   441→            className="flex w-full items-center justify-between border-t border-slate-100 px-4 py-3 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+   442→   442→          >
+   443→   443→            <span className="flex items-center gap-2">
+   444→   444→              <Receipt className="h-4 w-4 text-slate-400" />
+   445→   445→              Bill details
+   446→   446→            </span>
+   447→   447→            <ChevronDown
+   448→   448→              className={cn(
+   449→   449→                'h-4 w-4 text-slate-400 transition-transform',
+   450→   450→                billExpanded && 'rotate-180',
+   451→   451→              )}
+   452→   452→            />
+   453→   453→          </button>
+   454→   454→          <AnimatePresence>
+   455→   455→            {billExpanded && (
+   456→   456→              <motion.div
+   457→   457→                initial={{ height: 0, opacity: 0 }}
+   458→   458→                animate={{ height: 'auto', opacity: 1 }}
+   459→   459→                exit={{ height: 0, opacity: 0 }}
+   460→   460→                transition={{ duration: 0.25 }}
+   461→   461→                className="overflow-hidden border-t border-slate-50 bg-slate-50/50"
+   462→   462→              >
+   463→   463→                <div className="space-y-1.5 px-4 py-3 text-[12.5px]">
+   464→   464→                  <BillRow label="Item total" value={order.subtotal} />
+   465→   465→                  {order.taxAmount > 0 && <BillRow label="Taxes & GST" value={order.taxAmount} />}
+   466→   466→                  {order.serviceCharge > 0 && (
+   467→   467→                    <BillRow label="Service charge" value={order.serviceCharge} />
+   468→   468→                  )}
+   469→   469→                  <div className="flex items-center justify-between border-t border-slate-200 pt-2">
+   470→   470→                    <span className="text-[13.5px] font-extrabold text-slate-900">Grand total</span>
+   471→   471→                    <span className="text-[14px] font-extrabold text-slate-900">
+   472→   472→                      {formatINR(order.grandTotal)}
+   473→   473→                    </span>
+   474→   474→                  </div>
+   475→   475→                </div>
+   476→   476→              </motion.div>
+   477→   477→            )}
+   478→   478→          </AnimatePresence>
+   479→   479→        </motion.div>
+   480→   480→
+   481→   481→        {/* ----- Status messages (paid / completed) ----- */}
+   482→   482→        {isPaid && !isCompleted && (
+   483→   483→          <motion.div
+   484→   484→            initial={{ y: 8, opacity: 0 }}
+   485→   485→            animate={{ y: 0, opacity: 1 }}
+   486→   486→            className="mt-3 flex items-center gap-2.5 rounded-xl bg-green-50 p-3.5"
+   487→   487→          >
+   488→   488→            <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
+   489→   489→            <p className="text-[13px] font-medium text-green-700">
+   490→   490→              Payment received — thank you!
+   491→   491→            </p>
+   492→   492→          </motion.div>
+   493→   493→        )}
+   494→   494→        {isCompleted && (
+   495→   495→          <motion.div
+   496→   496→            initial={{ y: 8, opacity: 0 }}
+   497→   497→            animate={{ y: 0, opacity: 1 }}
+   498→   498→            className="mt-3 flex items-center gap-2.5 rounded-xl bg-slate-50 p-3.5"
+   499→   499→          >
+   500→   500→            <Sparkles className="h-5 w-5 shrink-0 text-orange-500" />
+   501→   501→            <p className="text-[13px] font-medium text-slate-700">
+   502→   502→              Order completed. Thank you for dining with us!
+   503→   503→            </p>
+   504→   504→          </motion.div>
+   505→   505→        )}
+   506→   506→
+   507→   507→        {/* ----- Cancel (only on NEW / PENDING_PAYMENT orders) ----- */}
+   508→   508→        {canCancel && (
+   509→   509→          <div className="mt-3">
+   510→   510→            <Button
+   511→   511→              variant="ghost"
+   512→   512→              className="h-10 w-full rounded-xl text-[13px] font-medium text-red-500 hover:bg-red-50 hover:text-red-600"
+   513→   513→              disabled={cancel.isPending}
+   514→   514→              onClick={async () => {
+   515→   515→                try {
+   516→   516→                  await cancel.mutateAsync(orderId)
+   517→   517→                  toast.success('Order cancelled')
+   518→   518→                  onBackToMenu()
+   519→   519→                } catch (err: any) {
+   520→   520→                  toast.error(err.message || 'Could not cancel')
+   521→   521→                }
+   522→   522→              }}
+   523→   523→            >
+   524→   524→              <XCircle className="mr-2 h-4 w-4" />
+   525→   525→              Cancel order
+   526→   526→            </Button>
+   527→   527→          </div>
+   528→   528→        )}
+   529→   529→      </div>
+   530→   530→
+   531→   531→      {/* ----- Sticky bottom action bar ----- */}
+   532→   532→      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-100 bg-white/95 backdrop-blur-md">
+   533→   533→        <div className="mx-auto max-w-2xl px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+   534→   534→          {needsToPay ? (
+   535→   535→            <Button
+   536→   536→              size="lg"
+   537→   537→              className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/30 transition-all hover:bg-orange-700 active:scale-[0.99]"
+   538→   538→              onClick={() => setCheckoutOpen(true)}
+   539→   539→            >
+   540→   540→              <CreditCard className="mr-2 h-4 w-4" />
+   541→   541→              Pay {formatINR(order.grandTotal)}
+   542→   542→              <ArrowRight className="ml-2 h-4 w-4" />
+   543→   543→            </Button>
+   544→   544→          ) : canRequestBill ? (
+   545→   545→            <Button
+   546→   546→              size="lg"
+   547→   547→              className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/30 transition-all hover:bg-orange-700 active:scale-[0.99]"
+   548→   548→              onClick={onProceedToBill}
+   549→   549→            >
+   550→   550→              Proceed to bill
+   551→   551→              <ArrowRight className="ml-2 h-4 w-4" />
+   552→   552→            </Button>
+   553→   553→          ) : isCompleted ? (
+   554→   554→            <Button
+   555→   555→              size="lg"
+   556→   556→              className="h-12 w-full rounded-xl bg-slate-900 text-[15px] font-bold text-white transition-all hover:bg-slate-800 active:scale-[0.99]"
+   557→   557→              onClick={onBackToMenu}
+   558→   558→            >
+   559→   559→              Place another order
+   560→   560→            </Button>
+   561→   561→          ) : (
+   562→   562→            <Button
+   563→   563→              size="lg"
+   564→   564→              variant="outline"
+   565→   565→              className="h-12 w-full rounded-xl border-slate-300 text-[15px] font-semibold text-slate-700 hover:bg-slate-50"
+   566→   566→              onClick={onBackToMenu}
+   567→   567→            >
+   568→   568→              Back to menu
+   569→   569→            </Button>
+   570→   570→          )}
+   571→   571→        </div>
+   572→   572→      </div>
+   573→   573→
+   574→   574→      {/* ----- Zepto-style Checkout Sheet ----- */}
+   575→   575→      <CheckoutSheet
+   576→   576→        open={checkoutOpen}
+   577→   577→        onOpenChange={setCheckoutOpen}
+   578→   578→        restaurant={restaurant as RestaurantInfo}
+   579→   579→        totals={{
+   580→   580→          itemCount: order.items?.length || 0,
+   581→   581→          subtotal: order.subtotal,
+   582→   582→          taxAmount: order.taxAmount,
+   583→   583→          serviceCharge: order.serviceCharge,
+   584→   584→          grandTotal: order.grandTotal,
+   585→   585→        }}
+   586→   586→        items={[]}
+   587→   587→        existingOrderId={order.id}
+   588→   588→        skipCustomerDetails
+   589→   589→        // Hide the pay-on-delivery method(s) the customer already chose at
+   590→   590→        // order placement — they shouldn't be asked to pick it again.
+   591→   591→        hiddenMethodIds={hiddenMethodIds}
+   592→   592→        onCheckoutComplete={() => {
+   593→   593→          setCheckoutOpen(false)
+   594→   594→          qc.invalidateQueries({ queryKey: ['customer-order', orderId] })
+   595→   595→        }}
+   596→   596→      />
+   597→   597→    </div>
+   598→   598→  )
+   599→   599→}
+   600→   600→
+   601→   601→// ---------------------------------------------------------------------------
+   602→   602→// Helpers
+   603→   603→// ---------------------------------------------------------------------------
+   604→   604→function BillRow({ label, value }: { label: string; value: number }) {
+   605→   605→  return (
+   606→   606→    <div className="flex items-center justify-between text-slate-500">
+   607→   607→      <span>{label}</span>
+   608→   608→      <span className="font-medium text-slate-700">{formatINR(value)}</span>
+   609→   609→    </div>
+   610→   610→  )
+   611→   611→}
+   612→   612→

@@ -606,3 +606,25 @@ Stage Summary:
 - New compact card (`MenuItemCardCompact`): image with overlaid veg/popular/spicy badges, circular quick-add button at image bottom-right that swaps to a `[- N +]` rounded-full counter when the item is in cart, 2-line name, price + variants hint. Cart state is shared with the existing `MenuSection` via the new `useItemCartState` hook — single source of truth, no behavioural drift between the two card variants
 - All existing functionality preserved: IntersectionObserver auto-highlights tabs on scroll, quick-add skips to item detail sheet when variants/required modifiers exist, sold-out items are non-interactive, hash-based view switching (menu/track/bill) unchanged, FloatingCartButton and ItemDetailSheet untouched
 - Files changed: 3 (restaurant-header.tsx full rewrite, menu-list.tsx full rewrite, menu-item-card.tsx additive — new helper hook + new component, existing MenuSection externally unchanged)
+
+---
+Task ID: 2
+Agent: main (z.ai code)
+Task: Push feature code to GitHub (github.com/buffyjdv-collab/take2) and configure Neon Postgres database.
+
+Work Log:
+- Restored prisma/schema.prisma datasource provider from sqlite -> postgresql (matches take2/main original; no diff vs remote).
+- Updated .env: DATABASE_URL points to Neon Postgres (postgresql://...?sslmode=require). Removed channel_binding=require param (Prisma CLI doesn't support it; db.ts sanitizeDatabaseUrl strips it at runtime anyway). Note: had to `unset DATABASE_URL` in shell because a stale SQLite value from earlier work was shadowing the .env file.
+- Ran `bun run db:generate` (postgres client) + `bun run db:push` (Neon already in sync) + `bun run scripts/seed.ts` — seeded Spice Garden demo data (restaurant, 20 tables, 26 menu items, 6 payment methods, 9 staff users) into Neon.
+- Enabled autoAcceptOrders=true on the Neon DB for demo testing.
+- New table T1 QR token on Neon: sg-1-fz99au3rwz.
+- Verified dev server against Neon: GET /api/customer/menu?table=sg-1-fz99au3rwz -> HTTP 200, Spice Garden data returned.
+- Git: added take2 as remote (with PAT for auth), fetched take2/main history, did `git reset --soft take2/main` then `git reset --mixed` to align HEAD with take2/main while keeping working tree. Restored .env, worklog.md, db/custom.db to take2 versions (avoided committing trivial/overwriting changes). Staged ONLY the 4 feature files (checkout-sheet, order-tracking, cart-drawer, customer-app). Committed as 14a6c77.
+- Pushed: `git push take2 HEAD:main` -> a029669..14a6c77 HEAD -> main (SUCCESS).
+- Security: removed PAT from remote URL via `git remote set-url` (verified .git/config has 0 occurrences of ghp_). Verified commit on GitHub via authenticated API: sha 14a6c77ab0bd73e6f459858366cf67797f1d1d53 is the latest commit on main.
+
+Stage Summary:
+- Feature commit 14a6c77 is live on GitHub at https://github.com/buffyjdv-collab/take2 (main branch).
+- Neon Postgres database is seeded and the dev server runs against it (port 3000, realtime on 3003).
+- Only 4 source files were committed (134 insertions, 4 deletions); no .env, no DB binaries, no verification artifacts included.
+- PAT was used only for the push and then scrubbed from git config.

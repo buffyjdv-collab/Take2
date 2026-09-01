@@ -1,0 +1,840 @@
+     1→/* eslint-disable */
+     2→/**
+     3→ * Seed script for Spice Garden restaurant demo data.
+     4→ * Run with: `bun run scripts/seed.ts` (or `npx tsx scripts/seed.ts`)
+     5→ *
+     6→ * Creates:
+     7→ *   - 1 Super Admin + 1 Owner + 1 Manager + 2 Kitchen + 3 Waiters + 1 Cashier
+     8→ *   - 1 Restaurant (Spice Garden) with 1 Branch
+     9→ *   - 20 Tables (T1..T20) with QR tokens
+    10→ *   - 6 Menu Categories
+    11→ *   - 24 Menu Items with variants + modifier groups
+    12→ *   - Restaurant Settings
+    13→ */
+    14→import bcrypt from 'bcryptjs'
+    15→import { db } from '../src/lib/db'
+    16→import { defaultSeededPaymentMethods } from '../src/lib/payment-method-defaults'
+    17→
+    18→async function main() {
+    19→  console.log('🌱 Seeding Spice Garden restaurant...')
+    20→
+    21→  // Clean existing data (order matters for FK constraints)
+    22→  await db.auditLog.deleteMany()
+    23→  await db.notification.deleteMany()
+    24→  await db.serviceRequest.deleteMany()
+    25→  await db.invoice.deleteMany()
+    26→  await db.payment.deleteMany()
+    27→  await db.orderItemModifier.deleteMany()
+    28→  await db.orderItem.deleteMany()
+    29→  await db.order.deleteMany()
+    30→  await db.customer.deleteMany()
+    31→  await db.modifier.deleteMany()
+    32→  await db.modifierGroup.deleteMany()
+    33→  await db.menuVariant.deleteMany()
+    34→  await db.menuItem.deleteMany()
+    35→  await db.menuCategory.deleteMany()
+    36→  await db.table.deleteMany()
+    37→  await db.restaurantSettings.deleteMany()
+    38→  await db.restaurantPaymentMethod.deleteMany()
+    39→  await db.branch.deleteMany()
+    40→  await db.session.deleteMany()
+    41→  await db.account.deleteMany()
+    42→  await db.user.deleteMany()
+    43→  await db.restaurant.deleteMany()
+    44→  console.log('  ✓ Cleaned existing data')
+    45→
+    46→  // ---------------------------------------------------------------- Restaurant
+    47→  const restaurant = await db.restaurant.create({
+    48→    data: {
+    49→      slug: 'spice-garden',
+    50→      name: 'Spice Garden',
+    51→      tagline: 'Authentic Indian Cuisine • Since 1998',
+    52→      description:
+    53→        'A beloved culinary destination serving authentic Indian flavors crafted from age-old family recipes. From sizzling tandoori starters to aromatic biryanis and rich curries, every dish is a celebration of India\'s diverse culinary heritage.',
+    54→      address: '14 MG Road, Bengaluru',
+    55→      city: 'Bengaluru',
+    56→      state: 'Karnataka',
+    57→      postalCode: '560001',
+    58→      phone: '+91 80 2345 6789',
+    59→      email: 'hello@spicegarden.in',
+    60→      website: 'spicegarden.in',
+    61→      gstNumber: '29ABCDE1234F1Z5',
+    62→      panNumber: 'ABCDE1234F',
+    63→      currency: 'INR',
+    64→      currencySymbol: '₹',
+    65→      taxRate: 0.05,
+    66→      serviceChargeRate: 0.0,
+    67→      openingTime: '09:00',
+    68→      closingTime: '23:00',
+    69→      isOpen: true,
+    70→      acceptUpi: true,
+    71→      acceptCard: true,
+    72→      acceptCash: true,
+    73→      acceptCounter: true,
+    74→      primaryColor: '#EA580C',
+    75→      accentColor: '#16A34A',
+    76→      plan: 'PRO',
+    77→      subscriptionStatus: 'ACTIVE',
+    78→    },
+    79→  })
+    80→  console.log('  ✓ Created restaurant: Spice Garden')
+    81→
+    82→  const branch = await db.branch.create({
+    83→    data: {
+    84→      restaurantId: restaurant.id,
+    85→      name: 'MG Road (Main)',
+    86→      address: '14 MG Road, Bengaluru',
+    87→      phone: '+91 80 2345 6789',
+    88→      active: true,
+    89→    },
+    90→  })
+    91→
+    92→  await db.restaurantSettings.create({
+    93→    data: {
+    94→      restaurantId: restaurant.id,
+    95→      receiptHeader: 'Spice Garden — Thank you for dining with us!',
+    96→      receiptFooter: 'Visit again: spicegarden.in • +91 80 2345 6789',
+    97→      showLogoOnReceipt: true,
+    98→      notifyKitchenOnNewOrder: true,
+    99→      notifyWaiterOnBillRequest: true,
+   100→      playSoundOnNewOrder: true,
+   101→      autoAcceptOrders: false,
+   102→      allowCallWaiter: true,
+   103→      allowRequestBill: true,
+   104→      maxItemsPerOrder: 50,
+   105→      taxInclusive: false,
+   106→    },
+   107→  })
+   108→
+   109→  // ---------------------------------------------------- Restaurant Payment Methods
+   110→  // Zepto-style: each row = one configurable payment option at checkout.
+   111→  // Defaults: UPI (active, with VPA), Cash (active), Counter (active),
+   112→  // Card / Wallet / Net Banking (seeded but inactive — flip on in Settings).
+   113→  await db.restaurantPaymentMethod.createMany({
+   114→    data: defaultSeededPaymentMethods(restaurant.upiId).map((m) => ({
+   115→      restaurantId: restaurant.id,
+   116→      type: m.type,
+   117→      label: m.label,
+   118→      description: m.description,
+   119→      icon: m.icon,
+   120→      accentColor: m.accentColor,
+   121→      active: m.active,
+   122→      priority: m.priority,
+   123→      config: m.config as any,
+   124→    })),
+   125→  })
+   126→  console.log('  ✓ Created 6 payment methods (3 active: UPI, Cash, Counter)')
+   127→
+   128→  // -------------------------------------------------------------------- Users
+   129→  const passwordHash = await bcrypt.hash('password123', 10)
+   130→
+   131→  const superAdmin = await db.user.create({
+   132→    data: {
+   133→      email: 'admin@platform.com',
+   134→      name: 'Platform Super Admin',
+   135→      passwordHash,
+   136→      role: 'SUPER_ADMIN',
+   137→      active: true,
+   138→    },
+   139→  })
+   140→
+   141→  const owner = await db.user.create({
+   142→    data: {
+   143→      email: 'owner@spicegarden.in',
+   144→      name: 'Rajesh Kapoor',
+   145→      passwordHash,
+   146→      role: 'RESTAURANT_OWNER',
+   147→      restaurantId: restaurant.id,
+   148→      branchId: branch.id,
+   149→      active: true,
+   150→    },
+   151→  })
+   152→
+   153→  const manager = await db.user.create({
+   154→    data: {
+   155→      email: 'manager@spicegarden.in',
+   156→      name: 'Priya Sharma',
+   157→      passwordHash,
+   158→      role: 'MANAGER',
+   159→      restaurantId: restaurant.id,
+   160→      branchId: branch.id,
+   161→      active: true,
+   162→    },
+   163→  })
+   164→
+   165→  const kitchen1 = await db.user.create({
+   166→    data: {
+   167→      email: 'chef1@spicegarden.in',
+   168→      name: 'Chef Anil Kumar',
+   169→      passwordHash,
+   170→      role: 'KITCHEN_STAFF',
+   171→      restaurantId: restaurant.id,
+   172→      branchId: branch.id,
+   173→      active: true,
+   174→    },
+   175→  })
+   176→
+   177→  const kitchen2 = await db.user.create({
+   178→    data: {
+   179→      email: 'chef2@spicegarden.in',
+   180→      name: 'Chef Vikram Singh',
+   181→      passwordHash,
+   182→      role: 'KITCHEN_STAFF',
+   183→      restaurantId: restaurant.id,
+   184→      branchId: branch.id,
+   185→      active: true,
+   186→    },
+   187→  })
+   188→
+   189→  const waiter1 = await db.user.create({
+   190→    data: {
+   191→      email: 'waiter1@spicegarden.in',
+   192→      name: 'Suresh Patel',
+   193→      passwordHash,
+   194→      role: 'WAITER',
+   195→      restaurantId: restaurant.id,
+   196→      branchId: branch.id,
+   197→      active: true,
+   198→    },
+   199→  })
+   200→
+   201→  const waiter2 = await db.user.create({
+   202→    data: {
+   203→      email: 'waiter2@spicegarden.in',
+   204→      name: 'Lakshmi Reddy',
+   205→      passwordHash,
+   206→      role: 'WAITER',
+   207→      restaurantId: restaurant.id,
+   208→      branchId: branch.id,
+   209→      active: true,
+   210→    },
+   211→  })
+   212→
+   213→  const waiter3 = await db.user.create({
+   214→    data: {
+   215→      email: 'waiter3@spicegarden.in',
+   216→      name: 'Arjun Nair',
+   217→      passwordHash,
+   218→      role: 'WAITER',
+   219→      restaurantId: restaurant.id,
+   220→      branchId: branch.id,
+   221→      active: true,
+   222→    },
+   223→  })
+   224→
+   225→  const cashier = await db.user.create({
+   226→    data: {
+   227→      email: 'cashier@spicegarden.in',
+   228→      name: 'Meera Iyer',
+   229→      passwordHash,
+   230→      role: 'CASHIER',
+   231→      restaurantId: restaurant.id,
+   232→      branchId: branch.id,
+   233→      active: true,
+   234→    },
+   235→  })
+   236→
+   237→  console.log('  ✓ Created 9 staff users (super admin, owner, manager, 2 chefs, 3 waiters, cashier)')
+   238→
+   239→  // ------------------------------------------------------------------- Tables
+   240→  // 20 tables with unique secure QR tokens
+   241→  for (let i = 1; i <= 20; i++) {
+   242→    const number = `T${i}`
+   243→    const token = `sg-${i}-${Math.random().toString(36).slice(2, 12)}`
+   244→    const capacity = i <= 10 ? 4 : i <= 15 ? 6 : 8
+   245→    await db.table.create({
+   246→      data: {
+   247→        restaurantId: restaurant.id,
+   248→        branchId: branch.id,
+   249→        number,
+   250→        label: i <= 10 ? `Indoor ${i}` : i <= 15 ? `Window ${i}` : `Family ${i}`,
+   251→        capacity,
+   252→        active: true,
+   253→        qrCodeToken: token,
+   254→        status: 'AVAILABLE',
+   255→      },
+   256→    })
+   257→  }
+   258→  console.log('  ✓ Created 20 tables (T1..T20) with unique QR tokens')
+   259→
+   260→  // ------------------------------------------------------------ Menu Categories
+   261→  const categories = await Promise.all(
+   262→    [
+   263→      { name: 'Starters',    icon: '🥗', sortOrder: 1 },
+   264→      { name: 'Biryani',     icon: '🍚', sortOrder: 2 },
+   265→      { name: 'Main Course', icon: '🍛', sortOrder: 3 },
+   266→      { name: 'Breads',      icon: '🫓', sortOrder: 4 },
+   267→      { name: 'Beverages',   icon: '🥤', sortOrder: 5 },
+   268→      { name: 'Desserts',    icon: '🍮', sortOrder: 6 },
+   269→    ].map((c) =>
+   270→      db.menuCategory.create({
+   271→        data: { restaurantId: restaurant.id, ...c, active: true },
+   272→      }),
+   273→    ),
+   274→  )
+   275→  const [startersCat, biryaniCat, mainCourseCat, breadsCat, beveragesCat, dessertsCat] = categories
+   276→  console.log('  ✓ Created 6 menu categories')
+   277→
+   278→  // ----------------------------------------------------------- Helper: Addons
+   279→  // Reusable modifier groups
+   280→  const cheeseGroup = await db.modifierGroup.create({
+   281→    data: {
+   282→      restaurantId: restaurant.id,
+   283→      name: 'Extra Cheese',
+   284→      selectionType: 'SINGLE',
+   285→      required: false,
+   286→      minSelection: 0,
+   287→      maxSelection: 1,
+   288→      sortOrder: 1,
+   289→      modifiers: {
+   290→        create: [
+   291→          { name: 'No Extra', price: 0, sortOrder: 1, isDefault: true },
+   292→          { name: 'Single',   price: 30, sortOrder: 2 },
+   293→          { name: 'Double',   price: 60, sortOrder: 3 },
+   294→        ],
+   295→      },
+   296→    },
+   297→  })
+   298→
+   299→  const spiceGroup = await db.modifierGroup.create({
+   300→    data: {
+   301→      restaurantId: restaurant.id,
+   302→      name: 'Spice Level',
+   303→      selectionType: 'SINGLE',
+   304→      required: true,
+   305→      minSelection: 1,
+   306→      maxSelection: 1,
+   307→      sortOrder: 2,
+   308→      modifiers: {
+   309→        create: [
+   310→          { name: 'Mild',      price: 0, sortOrder: 1, isDefault: true },
+   311→          { name: 'Medium',    price: 0, sortOrder: 2 },
+   312→          { name: 'Spicy',     price: 0, sortOrder: 3 },
+   313→          { name: 'Extra Spicy', price: 0, sortOrder: 4 },
+   314→        ],
+   315→      },
+   316→    },
+   317→  })
+   318→
+   319→  const addonGroup = await db.modifierGroup.create({
+   320→    data: {
+   321→      restaurantId: restaurant.id,
+   322→      name: 'Add-ons',
+   323→      selectionType: 'MULTIPLE',
+   324→      required: false,
+   325→      minSelection: 0,
+   326→      maxSelection: 5,
+   327→      sortOrder: 3,
+   328→      modifiers: {
+   329→        create: [
+   330→          { name: 'Extra Patty', price: 80, sortOrder: 1 },
+   331→          { name: 'Fries',       price: 60, sortOrder: 2 },
+   332→          { name: 'Coleslaw',    price: 50, sortOrder: 3 },
+   333→          { name: 'Sauce Dip',   price: 25, sortOrder: 4 },
+   334→          { name: 'Onion Rings', price: 70, sortOrder: 5 },
+   335→        ],
+   336→      },
+   337→    },
+   338→  })
+   339→
+   340→  const sauceGroup = await db.modifierGroup.create({
+   341→    data: {
+   342→      restaurantId: restaurant.id,
+   343→      name: 'Sauce Choice',
+   344→      selectionType: 'SINGLE',
+   345→      required: true,
+   346→      minSelection: 1,
+   347→      maxSelection: 1,
+   348→      sortOrder: 4,
+   349→      modifiers: {
+   350→        create: [
+   351→          { name: 'Mint Mayo',  price: 0, sortOrder: 1, isDefault: true },
+   352→          { name: 'Tomato',     price: 0, sortOrder: 2 },
+   353→          { name: 'Cheese',     price: 10, sortOrder: 3 },
+   354→          { name: 'Peri Peri',  price: 15, sortOrder: 4 },
+   355→        ],
+   356→      },
+   357→    },
+   358→  })
+   359→
+   360→  const sizeGroup = await db.modifierGroup.create({
+   361→    data: {
+   362→      restaurantId: restaurant.id,
+   363→      name: 'Size',
+   364→      selectionType: 'SINGLE',
+   365→      required: true,
+   366→      minSelection: 1,
+   367→      maxSelection: 1,
+   368→      sortOrder: 0,
+   369→      modifiers: {
+   370→        create: [
+   371→          { name: 'Regular', price: 0,  sortOrder: 1, isDefault: true },
+   372→          { name: 'Medium',  price: 40, sortOrder: 2 },
+   373→          { name: 'Large',   price: 80, sortOrder: 3 },
+   374→        ],
+   375→      },
+   376→    },
+   377→  })
+   378→
+   379→  // --------------------------------------------------------------- Menu Items
+   380→  type MenuItemSeed = {
+   381→    name: string
+   382→    description: string
+   383→    image: string
+   384→    isVeg: boolean
+   385→    isSpicy: boolean
+   386→    basePrice: number
+   387→    category: any
+   388→    isFeatured?: boolean
+   389→    isPopular?: boolean
+   390→    prepTime?: number
+   391→    tags?: string
+   392→    variants?: { name: string; priceModifier: number; isDefault?: boolean }[]
+   393→    modifierGroupIds?: string[]
+   394→  }
+   395→
+   396→  const items: MenuItemSeed[] = [
+   397→    // ---- Starters ----
+   398→    {
+   399→      name: 'Paneer Tikka',
+   400→      description: 'Cubes of cottage cheese marinated in spiced yogurt and char-grilled in the tandoor with bell peppers and onions.',
+   401→      image: 'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=600',
+   402→      isVeg: true, isSpicy: false, basePrice: 249, category: startersCat, isFeatured: true, prepTime: 15,
+   403→      tags: 'bestseller, tandoor',
+   404→      variants: [
+   405→        { name: 'Half (6 pcs)', priceModifier: 0, isDefault: true },
+   406→        { name: 'Full (12 pcs)', priceModifier: 130 },
+   407→      ],
+   408→      modifierGroupIds: [spiceGroup.id],
+   409→    },
+   410→    {
+   411→      name: 'Chicken 65',
+   412→      description: 'Deep-fried chicken bites tossed in a fiery South Indian style curry leaf and chili tempering.',
+   413→      image: 'https://images.unsplash.com/photo-1610057099431-d73a1c9d2f2f?w=600',
+   414→      isVeg: false, isSpicy: true, basePrice: 279, category: startersCat, isPopular: true, prepTime: 15,
+   415→      tags: 'spicy, south indian',
+   416→      variants: [
+   417→        { name: 'Half', priceModifier: 0, isDefault: true },
+   418→        { name: 'Full', priceModifier: 140 },
+   419→      ],
+   420→      modifierGroupIds: [spiceGroup.id],
+   421→    },
+   422→    {
+   423→      name: 'Veg Manchurian',
+   424→      description: 'Crispy vegetable dumplings tossed in a tangy, garlicky Indo-Chinese sauce.',
+   425→      image: 'https://images.unsplash.com/photo-1626100134240-cba0adfb46e2?w=600',
+   426→      isVeg: true, isSpicy: false, basePrice: 219, category: startersCat, prepTime: 12,
+   427→      variants: [
+   428→        { name: 'Dry', priceModifier: 0, isDefault: true },
+   429→        { name: 'Gravy', priceModifier: 20 },
+   430→      ],
+   431→      modifierGroupIds: [spiceGroup.id],
+   432→    },
+   433→    {
+   434→      name: 'Crispy Corn',
+   435→      description: 'Golden fried sweet corn kernels tossed with peppers, onions and a mild chili seasoning.',
+   436→      image: 'https://images.unsplash.com/photo-1606755962773-d324e0a13086?w=600',
+   437→      isVeg: true, isSpicy: false, basePrice: 199, category: startersCat, prepTime: 10,
+   438→      modifierGroupIds: [spiceGroup.id],
+   439→    },
+   440→    // ---- Biryani ----
+   441→    {
+   442→      name: 'Chicken Biryani',
+   443→      description: 'Long-grain basmati rice layered with marinated chicken, saffron, fried onions and aromatic spices. Dum-cooked to perfection. Served with raita and salan.',
+   444→      image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600',
+   445→      isVeg: false, isSpicy: true, basePrice: 299, category: biryaniCat, isFeatured: true, isPopular: true, prepTime: 25,
+   446→      tags: 'bestseller, dum-cooked',
+   447→      variants: [
+   448→        { name: 'Regular', priceModifier: 0, isDefault: true },
+   449→        { name: 'Large',   priceModifier: 80 },
+   450→      ],
+   451→      modifierGroupIds: [spiceGroup.id, addonGroup.id],
+   452→    },
+   453→    {
+   454→      name: 'Mutton Biryani',
+   455→      description: 'Tender slow-cooked mutton layered with fragrant basmati rice, saffron and whole spices.',
+   456→      image: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=600',
+   457→      isVeg: false, isSpicy: true, basePrice: 379, category: biryaniCat, isPopular: true, prepTime: 30,
+   458→      tags: 'premium',
+   459→      variants: [
+   460→        { name: 'Regular', priceModifier: 0, isDefault: true },
+   461→        { name: 'Large',   priceModifier: 90 },
+   462→      ],
+   463→      modifierGroupIds: [spiceGroup.id, addonGroup.id],
+   464→    },
+   465→    {
+   466→      name: 'Veg Dum Biryani',
+   467→      description: 'Basmati rice dum-cooked with mixed seasonal vegetables, saffron, mint and whole spices.',
+   468→      image: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=600',
+   469→      isVeg: true, isSpicy: true, basePrice: 249, category: biryaniCat, prepTime: 22,
+   470→      variants: [
+   471→        { name: 'Regular', priceModifier: 0, isDefault: true },
+   472→        { name: 'Large',   priceModifier: 70 },
+   473→      ],
+   474→      modifierGroupIds: [spiceGroup.id, addonGroup.id],
+   475→    },
+   476→    {
+   477→      name: 'Hyderabadi Veg Biryani',
+   478→      description: 'Authentic Hyderabadi-style biryani with vegetables, mint, fried onions and a hint of saffron.',
+   479→      image: 'https://images.unsplash.com/photo-1631452180791-6039c3b0fbf9?w=600',
+   480→      isVeg: true, isSpicy: true, basePrice: 269, category: biryaniCat, prepTime: 24,
+   481→      modifierGroupIds: [spiceGroup.id],
+   482→    },
+   483→    // ---- Main Course ----
+   484→    {
+   485→      name: 'Butter Chicken',
+   486→      description: 'Tandoor-roasted chicken simmered in a rich, creamy tomato and cashew gravy with a hint of fenugreek.',
+   487→      image: 'https://images.unsplash.com/photo-1588166524941-3bf61a9c41db?w=600',
+   488→      isVeg: false, isSpicy: false, basePrice: 329, category: mainCourseCat, isFeatured: true, isPopular: true, prepTime: 20,
+   489→      tags: 'bestseller, creamy',
+   490→      variants: [
+   491→        { name: 'Half', priceModifier: 0, isDefault: true },
+   492→        { name: 'Full', priceModifier: 160 },
+   493→      ],
+   494→      modifierGroupIds: [spiceGroup.id, cheeseGroup.id],
+   495→    },
+   496→    {
+   497→      name: 'Paneer Butter Masala',
+   498→      description: 'Soft paneer cubes simmered in a creamy tomato gravy with cashews, butter and a touch of garam masala.',
+   499→      image: 'https://images.unsplash.com/photo-1631452180791-6039c3b0fbf9?w=600',
+   500→      isVeg: true, isSpicy: false, basePrice: 289, category: mainCourseCat, isPopular: true, prepTime: 18,
+   501→      tags: 'creamy, bestseller',
+   502→      variants: [
+   503→        { name: 'Half', priceModifier: 0, isDefault: true },
+   504→        { name: 'Full', priceModifier: 140 },
+   505→      ],
+   506→      modifierGroupIds: [spiceGroup.id, cheeseGroup.id],
+   507→    },
+   508→    {
+   509→      name: 'Dal Makhani',
+   510→      description: 'Black lentils slow-cooked overnight with butter, cream and tomatoes — a North Indian classic.',
+   511→      image: 'https://images.unsplash.com/photo-1626500153438-247f8c4ec008?w=600',
+   512→      isVeg: true, isSpicy: false, basePrice: 239, category: mainCourseCat, prepTime: 15,
+   513→      modifierGroupIds: [spiceGroup.id],
+   514→    },
+   515→    {
+   516→      name: 'Kadai Paneer',
+   517→      description: 'Paneer and bell peppers tossed in a freshly ground kadai masala with onions and tomatoes.',
+   518→      image: 'https://images.unsplash.com/photo-1567188040759-fb8a883dc6d8?w=600',
+   519→      isVeg: true, isSpicy: true, basePrice: 279, category: mainCourseCat, prepTime: 18,
+   520→      modifierGroupIds: [spiceGroup.id],
+   521→    },
+   522→    {
+   523→      name: 'Mutton Rogan Josh',
+   524→      description: 'Tender mutton pieces slow-cooked in a Kashmiri-style aromatic red gravy with whole spices.',
+   525→      image: 'https://images.unsplash.com/photo-1574484284002-952d92456975?w=600',
+   526→      isVeg: false, isSpicy: true, basePrice: 389, category: mainCourseCat, prepTime: 30,
+   527→      tags: 'premium',
+   528→      modifierGroupIds: [spiceGroup.id],
+   529→    },
+   530→    {
+   531→      name: 'Chicken Tikka Masala',
+   532→      description: 'Char-grilled chicken tikka simmered in a rich onion-tomato gravy with creamy texture and aromatic spices.',
+   533→      image: 'https://images.unsplash.com/photo-1599487488170-d11ec9c172f0?w=600',
+   534→      isVeg: false, isSpicy: false, basePrice: 319, category: mainCourseCat, prepTime: 20,
+   535→      modifierGroupIds: [spiceGroup.id, cheeseGroup.id],
+   536→    },
+   537→    // ---- Breads ----
+   538→    {
+   539→      name: 'Butter Naan',
+   540→      description: 'Soft leavened bread baked in the tandoor, brushed with butter.',
+   541→      image: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=600',
+   542→      isVeg: true, isSpicy: false, basePrice: 59, category: breadsCat, prepTime: 8,
+   543→    },
+   544→    {
+   545→      name: 'Garlic Naan',
+   546→      description: 'Naan topped with fresh garlic, coriander and butter.',
+   547→      image: 'https://images.unsplash.com/photo-1633945274405-b6c8069047b0?w=600',
+   548→      isVeg: true, isSpicy: false, basePrice: 79, category: breadsCat, isPopular: true, prepTime: 8,
+   549→    },
+   550→    {
+   551→      name: 'Tandoori Roti',
+   552→      description: 'Whole wheat flatbread baked in the tandoor.',
+   553→      image: 'https://images.unsplash.com/photo-1604908554049-1c9bd3a0a8e3?w=600',
+   554→      isVeg: true, isSpicy: false, basePrice: 39, category: breadsCat, prepTime: 6,
+   555→    },
+   556→    {
+   557→      name: 'Laccha Paratha',
+   558→      description: 'Multi-layered flaky whole wheat paratha.',
+   559→      image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600',
+   560→      isVeg: true, isSpicy: false, basePrice: 69, category: breadsCat, prepTime: 8,
+   561→    },
+   562→    // ---- Beverages ----
+   563→    {
+   564→      name: 'Masala Chai',
+   565→      description: 'Indian spiced tea brewed with milk, ginger, cardamom and spices.',
+   566→      image: 'https://images.unsplash.com/photo-1571934811356-5cc061b6821f?w=600',
+   567→      isVeg: true, isSpicy: false, basePrice: 49, category: beveragesCat, prepTime: 5,
+   568→    },
+   569→    {
+   570→      name: 'Sweet Lassi',
+   571→      description: 'Chilled yogurt drink blended with sugar and a hint of cardamom.',
+   572→      image: 'https://images.unsplash.com/photo-1626078436898-7c2c9f3d6e6e?w=600',
+   573→      isVeg: true, isSpicy: false, basePrice: 89, category: beveragesCat, isPopular: true, prepTime: 5,
+   574→      variants: [
+   575→        { name: 'Regular', priceModifier: 0, isDefault: true },
+   576→        { name: 'Large',   priceModifier: 40 },
+   577→      ],
+   578→    },
+   579→    {
+   580→      name: 'Coca-Cola',
+   581→      description: 'Chilled 300ml bottle.',
+   582→      image: 'https://images.unsplash.com/photo-1554866585-cd94860890b7?w=600',
+   583→      isVeg: true, isSpicy: false, basePrice: 60, category: beveragesCat, prepTime: 2,
+   584→      variants: [
+   585→        { name: '300ml', priceModifier: 0, isDefault: true },
+   586→        { name: '500ml', priceModifier: 30 },
+   587→        { name: '750ml', priceModifier: 60 },
+   588→      ],
+   589→    },
+   590→    {
+   591→      name: 'Fresh Lime Soda',
+   592→      description: 'Refreshing lime juice with soda — sweet, salted or mixed.',
+   593→      image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=600',
+   594→      isVeg: true, isSpicy: false, basePrice: 79, category: beveragesCat, prepTime: 4,
+   595→      variants: [
+   596→        { name: 'Sweet', priceModifier: 0, isDefault: true },
+   597→        { name: 'Salted', priceModifier: 0 },
+   598→        { name: 'Mixed', priceModifier: 10 },
+   599→      ],
+   600→    },
+   601→    {
+   602→      name: 'Filter Coffee',
+   603→      description: 'Authentic South Indian filter coffee served in a steel tumbler.',
+   604→      image: 'https://images.unsplash.com/photo-1581006852262-e4307cf6283a?w=600',
+   605→      isVeg: true, isSpicy: false, basePrice: 69, category: beveragesCat, prepTime: 5,
+   606→    },
+   607→    // ---- Desserts ----
+   608→    {
+   609→      name: 'Gulab Jamun (2 pcs)',
+   610→      description: 'Warm milk-solid dumplings soaked in rose-cardamom sugar syrup.',
+   611→      image: 'https://images.unsplash.com/photo-1599487488170-d11ec9c172f0?w=600',
+   612→      isVeg: true, isSpicy: false, basePrice: 99, category: dessertsCat, isPopular: true, prepTime: 5,
+   613→    },
+   614→    {
+   615→      name: 'Rasmalai (2 pcs)',
+   616→      description: 'Soft cottage cheese discs soaked in saffron-cardamom flavored milk.',
+   617→      image: 'https://images.unsplash.com/photo-1633381373573-5b4968b80be4?w=600',
+   618→      isVeg: true, isSpicy: false, basePrice: 119, category: dessertsCat, prepTime: 5,
+   619→    },
+   620→    {
+   621→      name: 'Ice Cream Scoop',
+   622→      description: 'Choose from vanilla, chocolate, strawberry or mango.',
+   623→      image: 'https://images.unsplash.com/photo-1567206563064-6f60f40a2b57?w=600',
+   624→      isVeg: true, isSpicy: false, basePrice: 89, category: dessertsCat, prepTime: 3,
+   625→      variants: [
+   626→        { name: 'Vanilla', priceModifier: 0, isDefault: true },
+   627→        { name: 'Chocolate', priceModifier: 10 },
+   628→        { name: 'Strawberry', priceModifier: 10 },
+   629→        { name: 'Mango', priceModifier: 20 },
+   630→      ],
+   631→    },
+   632→  ]
+   633→
+   634→  for (const item of items) {
+   635→    const created = await db.menuItem.create({
+   636→      data: {
+   637→        restaurantId: restaurant.id,
+   638→        categoryId: item.category.id,
+   639→        name: item.name,
+   640→        description: item.description,
+   641→        image: item.image,
+   642→        isVeg: item.isVeg,
+   643→        isSpicy: item.isSpicy,
+   644→        basePrice: item.basePrice,
+   645→        taxRate: restaurant.taxRate,
+   646→        available: true,
+   647→        soldOut: false,
+   648→        isFeatured: item.isFeatured || false,
+   649→        isPopular: item.isPopular || false,
+   650→        tags: item.tags,
+   651→        prepTime: item.prepTime || 15,
+   652→        sortOrder: 0,
+   653→        variants: item.variants
+   654→          ? { create: item.variants }
+   655→          : undefined,
+   656→      },
+   657→    })
+   658→    // Attach modifier groups (require MenuItemModifierGroup junction via menuItemId)
+   659→    if (item.modifierGroupIds?.length) {
+   660→      for (const groupId of item.modifierGroupIds) {
+   661→        await db.modifierGroup.update({
+   662→          where: { id: groupId },
+   663→          data: { menuItemId: created.id },
+   664→        })
+   665→      }
+   666→    }
+   667→  }
+   668→  console.log(`  ✓ Created ${items.length} menu items with variants and modifier groups`)
+   669→
+   670→  // ------------------------------------------------------ Sample orders (3)
+   671→  // Create some demo orders so the dashboard isn't empty on first load
+   672→  const table1 = await db.table.findFirst({ where: { number: 'T1' } })
+   673→  const table2 = await db.table.findFirst({ where: { number: 'T2' } })
+   674→  const table3 = await db.table.findFirst({ where: { number: 'T3' } })
+   675→
+   676→  if (table1 && table2 && table3) {
+   677→    const chickenBiryani = await db.menuItem.findFirst({ where: { name: 'Chicken Biryani' } })
+   678→    const coke = await db.menuItem.findFirst({ where: { name: 'Coca-Cola' } })
+   679→    const butterChicken = await db.menuItem.findFirst({ where: { name: 'Butter Chicken' } })
+   680→    const naan = await db.menuItem.findFirst({ where: { name: 'Butter Naan' } })
+   681→
+   682→    if (chickenBiryani && coke && butterChicken && naan) {
+   683→      // Order 1: completed today
+   684→      const customer1 = await db.customer.create({
+   685→        data: { restaurantId: restaurant.id, name: 'Walk-in Guest', phone: null },
+   686→      })
+   687→      const subtotal1 = chickenBiryani.basePrice + coke.basePrice
+   688→      const tax1 = +(subtotal1 * restaurant.taxRate).toFixed(2)
+   689→      const total1 = +(subtotal1 + tax1).toFixed(2)
+   690→      const placed1 = new Date(Date.now() - 3 * 60 * 60 * 1000) // 3 hours ago
+   691→      const o1 = await db.order.create({
+   692→        data: {
+   693→          orderNumber: 'SG-000001',
+   694→          restaurantId: restaurant.id,
+   695→          branchId: branch.id,
+   696→          tableId: table1.id,
+   697→          customerId: customer1.id,
+   698→          status: 'COMPLETED',
+   699→          paymentStatus: 'PAID',
+   700→          paymentMethod: 'UPI',
+   701→          subtotal: subtotal1,
+   702→          taxAmount: tax1,
+   703→          grandTotal: total1,
+   704→          placedAt: placed1,
+   705→          acceptedAt: new Date(placed1.getTime() + 60_000),
+   706→          preparingAt: new Date(placed1.getTime() + 120_000),
+   707→          readyAt: new Date(placed1.getTime() + 25 * 60_000),
+   708→          servedAt: new Date(placed1.getTime() + 27 * 60_000),
+   709→          completedAt: new Date(placed1.getTime() + 35 * 60_000),
+   710→          acceptedById: manager.id,
+   711→          servedById: waiter1.id,
+   712→          items: {
+   713→            create: [
+   714→              {
+   715→                menuItemId: chickenBiryani.id, menuItemName: chickenBiryani.name,
+   716→                menuItemImage: chickenBiryani.image, quantity: 1,
+   717→                basePrice: chickenBiryani.basePrice, variantPrice: 0, modifiersTotal: 0,
+   718→                unitPrice: chickenBiryani.basePrice, totalPrice: chickenBiryani.basePrice, isVeg: chickenBiryani.isVeg,
+   719→              },
+   720→              {
+   721→                menuItemId: coke.id, menuItemName: coke.name, menuItemImage: coke.image,
+   722→                quantity: 2, basePrice: coke.basePrice, variantPrice: 0, modifiersTotal: 0,
+   723→                unitPrice: coke.basePrice, totalPrice: coke.basePrice * 2, isVeg: coke.isVeg,
+   724→              },
+   725→            ],
+   726→          },
+   727→        },
+   728→      })
+   729→      await db.payment.create({
+   730→        data: {
+   731→          orderId: o1.id, restaurantId: restaurant.id, method: 'UPI', status: 'PAID',
+   732→          amount: total1, currency: 'INR', provider: 'RAZORPAY',
+   733→          providerTxnId: 'pay_demo_0001', verifiedAt: new Date(), verifiedById: cashier.id,
+   734→        },
+   735→      })
+   736→
+   737→      // Order 2: in PREPARING
+   738→      const customer2 = await db.customer.create({
+   739→        data: { restaurantId: restaurant.id, name: 'Walk-in Guest', phone: null },
+   740→      })
+   741→      const subtotal2 = butterChicken.basePrice + naan.basePrice * 2
+   742→      const tax2 = +(subtotal2 * restaurant.taxRate).toFixed(2)
+   743→      const total2 = +(subtotal2 + tax2).toFixed(2)
+   744→      const placed2 = new Date(Date.now() - 8 * 60 * 1000) // 8 min ago
+   745→      const o2 = await db.order.create({
+   746→        data: {
+   747→          orderNumber: 'SG-000002',
+   748→          restaurantId: restaurant.id,
+   749→          branchId: branch.id,
+   750→          tableId: table2.id,
+   751→          customerId: customer2.id,
+   752→          status: 'PREPARING',
+   753→          paymentStatus: 'PENDING',
+   754→          subtotal: subtotal2,
+   755→          taxAmount: tax2,
+   756→          grandTotal: total2,
+   757→          placedAt: placed2,
+   758→          acceptedAt: new Date(placed2.getTime() + 30_000),
+   759→          preparingAt: new Date(placed2.getTime() + 90_000),
+   760→          acceptedById: manager.id,
+   761→          items: {
+   762→            create: [
+   763→              {
+   764→                menuItemId: butterChicken.id, menuItemName: butterChicken.name,
+   765→                menuItemImage: butterChicken.image, quantity: 1,
+   766→                basePrice: butterChicken.basePrice, variantPrice: 0, modifiersTotal: 0,
+   767→                unitPrice: butterChicken.basePrice, totalPrice: butterChicken.basePrice, isVeg: butterChicken.isVeg,
+   768→              },
+   769→              {
+   770→                menuItemId: naan.id, menuItemName: naan.name, menuItemImage: naan.image,
+   771→                quantity: 2, basePrice: naan.basePrice, variantPrice: 0, modifiersTotal: 0,
+   772→                unitPrice: naan.basePrice, totalPrice: naan.basePrice * 2, isVeg: naan.isVeg,
+   773→              },
+   774→            ],
+   775→          },
+   776→        },
+   777→      })
+   778→      await db.table.update({ where: { id: table2.id }, data: { status: 'FOOD_PREPARING' } })
+   779→
+   780→      // Order 3: NEW (just placed, kitchen hasn't accepted)
+   781→      const customer3 = await db.customer.create({
+   782→        data: { restaurantId: restaurant.id, name: 'Walk-in Guest', phone: null },
+   783→      })
+   784→      const subtotal3 = chickenBiryani.basePrice * 2
+   785→      const tax3 = +(subtotal3 * restaurant.taxRate).toFixed(2)
+   786→      const total3 = +(subtotal3 + tax3).toFixed(2)
+   787→      const placed3 = new Date(Date.now() - 90 * 1000) // 90 sec ago
+   788→      await db.order.create({
+   789→        data: {
+   790→          orderNumber: 'SG-000003',
+   791→          restaurantId: restaurant.id,
+   792→          branchId: branch.id,
+   793→          tableId: table3.id,
+   794→          customerId: customer3.id,
+   795→          status: 'NEW',
+   796→          paymentStatus: 'PENDING',
+   797→          subtotal: subtotal3,
+   798→          taxAmount: tax3,
+   799→          grandTotal: total3,
+   800→          placedAt: placed3,
+   801→          items: {
+   802→            create: [
+   803→              {
+   804→                menuItemId: chickenBiryani.id, menuItemName: chickenBiryani.name,
+   805→                menuItemImage: chickenBiryani.image, quantity: 2,
+   806→                basePrice: chickenBiryani.basePrice, variantPrice: 0, modifiersTotal: 0,
+   807→                unitPrice: chickenBiryani.basePrice, totalPrice: chickenBiryani.basePrice * 2,
+   808→                isVeg: chickenBiryani.isVeg,
+   809→              },
+   810→            ],
+   811→          },
+   812→        },
+   813→      })
+   814→      await db.table.update({ where: { id: table3.id }, data: { status: 'ORDERING' } })
+   815→
+   816→      console.log('  ✓ Created 3 sample orders (1 completed, 1 preparing, 1 new)')
+   817→    }
+   818→  }
+   819→
+   820→  console.log('\n✅ Seed complete!\n')
+   821→  console.log('Demo logins (password for all: password123):')
+   822→  console.log('  Super Admin    : admin@platform.com')
+   823→  console.log('  Owner          : owner@spicegarden.in')
+   824→  console.log('  Manager        : manager@spicegarden.in')
+   825→  console.log('  Kitchen Staff  : chef1@spicegarden.in')
+   826→  console.log('  Waiter         : waiter1@spicegarden.in')
+   827→  console.log('  Cashier        : cashier@spicegarden.in')
+   828→  console.log('\nSample customer scan URL:')
+   829→  console.log('  /?table=sg-1-xxxxxxxxxx  (use any QR token from DB)')
+   830→}
+   831→
+   832→main()
+   833→  .catch((e) => {
+   834→    console.error(e)
+   835→    process.exit(1)
+   836→  })
+   837→  .finally(async () => {
+   838→    await db.$disconnect()
+   839→  })
+   840→

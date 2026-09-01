@@ -1,0 +1,862 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * Zepto-style checkout sheet.
+     5→ *
+     6→ * A full-height bottom sheet that replaces the legacy inline checkout Dialog
+     7→ * in cart-drawer.tsx. The flow is:
+     8→ *
+     9→ *   Step 1 — "Details"   : Customer name + phone, "Continue to payment"
+    10→ *   Step 2 — "Payment"    : Order summary + PaymentMethodPicker + sticky "Pay ₹X" CTA
+    11→ *   Step 3 — Method flow : UPI deep-link launch / QR display / mock card+wallet
+    12→ *   Step 4 — "Success"   : Confirmation + redirect to tracking
+    13→ *
+    14→ * The picker is single-select (not "tap = pay"). The customer picks a method,
+    15→ * then taps the sticky bottom CTA — exactly like Zepto, Swiggy, Zomato.
+    16→ *
+    17→ * Used by:
+    18→ *   - cart-drawer.tsx (initial order placement)
+    19→ *   - bill-view.tsx (pay from the bill view, order already placed)
+    20→ *   - order-tracking.tsx (inline "please pay" panel when staff requests payment)
+    21→ */
+    22→import { useEffect, useMemo, useState } from 'react'
+    23→import {
+    24→  Sheet,
+    25→  SheetContent,
+    26→  SheetHeader,
+    27→  SheetTitle,
+    28→  SheetDescription,
+    29→} from '@/components/ui/sheet'
+    30→import { Button } from '@/components/ui/button'
+    31→import { Input } from '@/components/ui/input'
+    32→import { Label } from '@/components/ui/label'
+    33→import { Separator } from '@/components/ui/separator'
+    34→import {
+    35→  Smartphone,
+    36→  QrCode,
+    37→  Banknote,
+    38→  Loader2,
+    39→  CheckCircle2,
+    40→  Copy,
+    41→  ChevronLeft,
+    42→  ShieldCheck,
+    43→  Lock,
+    44→  AlertCircle,
+    45→  ArrowRight,
+    46→  type LucideIcon,
+    47→} from 'lucide-react'
+    48→import { motion, AnimatePresence } from 'framer-motion'
+    49→import { toast } from 'sonner'
+    50→import {
+    51→  usePlaceOrder,
+    52→  useInitiatePayment,
+    53→  useVerifyPayment,
+    54→} from '@/hooks/api'
+    55→import type { CartItem } from '@/lib/types'
+    56→import type { RestaurantInfo, PaymentMethodT } from './types'
+    57→import {
+    58→  PaymentMethodPicker,
+    59→  filterAvailableForCheckout,
+    60→} from './payment-method-picker'
+    61→
+    62→interface Totals {
+    63→  itemCount: number
+    64→  subtotal: number
+    65→  taxAmount: number
+    66→  serviceCharge: number
+    67→  grandTotal: number
+    68→}
+    69→
+    70→interface Props {
+    71→  open: boolean
+    72→  onOpenChange: (open: boolean) => void
+    73→  restaurant: RestaurantInfo
+    74→  totals: Totals
+    75→  items: CartItem[]
+    76→  /** Called when an order has been placed + payment (if any) is done. */
+    77→  onCheckoutComplete: (orderId: string) => void
+    78→  /** Optional: if provided, the sheet operates in "pay existing order" mode
+    79→   *  (used by bill-view + order-tracking). When undefined, the sheet first
+    80→   *  creates a new order via /api/customer/order. */
+    81→  existingOrderId?: string
+    82→  /** Optional: hide the customer-details step (used when name/phone already
+    83→   *  recorded on the order). */
+    84→  skipCustomerDetails?: boolean
+    85→  /** Optional: IDs of payment-method rows to HIDE from the picker. Used by
+    86→   *  order-tracking to hide the "Pay on delivery" method the customer already
+    87→   *  chose at order placement, so they're not asked to pick it again
+    88→   *  post-serve. */
+    89→  hiddenMethodIds?: string[]
+    90→}
+    91→
+    92→type Step = 'details' | 'method' | 'upi_launch' | 'qr' | 'processing' | 'success' | 'error'
+    93→
+    94→const ICON_FOR_METHOD: Record<string, LucideIcon> = {
+    95→  UPI: Smartphone,
+    96→  QR: QrCode,
+    97→  CASH: Banknote,
+    98→  CARD: Smartphone,
+    99→  WALLET: Smartphone,
+   100→  NETBANKING: Smartphone,
+   101→  COUNTER: Banknote,
+   102→  PAY_LATER: Banknote,
+   103→  CUSTOM: Smartphone,
+   104→}
+   105→
+   106→export function CheckoutSheet({
+   107→  open,
+   108→  onOpenChange,
+   109→  restaurant,
+   110→  totals,
+   111→  items,
+   112→  onCheckoutComplete,
+   113→  existingOrderId,
+   114→  skipCustomerDetails,
+   115→  hiddenMethodIds = [],
+   116→}: Props) {
+   117→  const placeOrder = usePlaceOrder()
+   118→  const initiate = useInitiatePayment()
+   119→  const verify = useVerifyPayment()
+   120→
+   121→  const [step, setStep] = useState<Step>(skipCustomerDetails ? 'method' : 'details')
+   122→  const [customerName, setCustomerName] = useState('')
+   123→  const [customerPhone, setCustomerPhone] = useState('')
+   124→  const [touched, setTouched] = useState(false)
+   125→  const [selectedMethod, setSelectedMethod] = useState<PaymentMethodT | null>(null)
+   126→  const [placedOrderId, setPlacedOrderId] = useState<string | null>(existingOrderId || null)
+   127→  const [upiDeepLink, setUpiDeepLink] = useState<string | null>(null)
+   128→  const [upiQrPayload, setUpiQrPayload] = useState<string | null>(null)
+   129→  const [upiId, setUpiId] = useState<string | null>(null)
+   130→  const [successMessage, setSuccessMessage] = useState<string>('')
+   131→  const [errorMessage, setErrorMessage] = useState<string>('')
+   132→
+   133→  // Reset everything when the sheet closes
+   134→  useEffect(() => {
+   135→    if (!open) {
+   136→      const t = setTimeout(() => {
+   137→        if (step !== 'processing') {
+   138→          setStep(skipCustomerDetails ? 'method' : 'details')
+   139→          setSelectedMethod(null)
+   140→          setUpiDeepLink(null)
+   141→          setUpiQrPayload(null)
+   142→          setUpiId(null)
+   143→          setTouched(false)
+   144→          setSuccessMessage('')
+   145→        }
+   146→      }, 300)
+   147→      return () => clearTimeout(t)
+   148→    }
+   149→  }, [open, step, skipCustomerDetails])
+   150→
+   151→  const availableMethods = useMemo(
+   152→    () => filterAvailableForCheckout(restaurant.paymentMethods),
+   153→    [restaurant.paymentMethods],
+   154→  )
+   155→
+   156→  const nameValid = customerName.trim().length >= 2
+   157→  const digits = customerPhone.replace(/[^\d]/g, '')
+   158→  const phoneValid = digits.length >= 7 && digits.length <= 15
+   159→  const formValid = nameValid && phoneValid
+   160→
+   161→  const grandTotal = totals.grandTotal
+   162→  const totalDisplay = `₹${grandTotal.toFixed(0)}`
+   163→
+   164→  // --------------------------------------------------------------------------
+   165→  // Action: place order (only when no existingOrderId was provided)
+   166→  // --------------------------------------------------------------------------
+   167→  async function ensureOrderPlaced(): Promise<string | null> {
+   168→    if (placedOrderId) return placedOrderId
+   169→    if (!formValid) {
+   170→      setTouched(true)
+   171→      toast.error('Please enter your name and phone number.')
+   172→      return null
+   173→    }
+   174→    const idempotencyKey =
+   175→      sessionStorage.getItem('last-idem-key') ||
+   176→      `${Date.now()}-${Math.random().toString(36).slice(2, 14)}`
+   177→    sessionStorage.setItem('last-idem-key', idempotencyKey)
+   178→
+   179→    const body = {
+   180→      tableToken: new URLSearchParams(window.location.search).get('table') || '',
+   181→      items: items.map((i: CartItem) => ({
+   182→        menuItemId: i.menuItemId,
+   183→        variantId: i.variantId,
+   184→        modifierIds: i.modifierIds,
+   185→        quantity: i.quantity,
+   186→        notes: i.notes,
+   187→      })),
+   188→      idempotencyKey,
+   189→      customerInfo: {
+   190→        name: customerName.trim(),
+   191→        phone: customerPhone.trim(),
+   192→      },
+   193→      // Persist the chosen payment-method ID on the order so the post-serve
+   194→      // picker can hide the same pay-on-delivery method if the customer picked
+   195→      // one (Cash / Counter / Pay Later).
+   196→      paymentMethodId: selectedMethod?.id || null,
+   197→    }
+   198→    const order = await placeOrder.mutateAsync(body)
+   199→    sessionStorage.removeItem('last-idem-key')
+   200→    setPlacedOrderId(order.id)
+   201→    return order.id
+   202→  }
+   203→
+   204→  // --------------------------------------------------------------------------
+   205→  // Action: trigger the selected payment method's flow
+   206→  // --------------------------------------------------------------------------
+   207→  async function handlePay() {
+   208→    if (!selectedMethod) {
+   209→      toast.error('Please choose a payment method.')
+   210→      return
+   211→    }
+   212→
+   213→    try {
+   214→      const orderId = await ensureOrderPlaced()
+   215→      if (!orderId) return
+   216→
+   217→      const t = selectedMethod.type
+   218→      // Cash / Counter / Pay-Later: no online payment — staff mark as paid.
+   219→      if (t === 'CASH' || t === 'COUNTER' || t === 'PAY_LATER') {
+   220→        setStep('processing')
+   221→        // Brief processing delay for UX, then show success
+   222→        await new Promise((r) => setTimeout(r, 600))
+   223→        setSuccessMessage(
+   224→          t === 'CASH'
+   225→            ? 'Order placed! Please hand the cash to your waiter.'
+   226→            : t === 'COUNTER'
+   227→              ? 'Order placed! Please pay at the billing counter.'
+   228→              : 'Order placed! You can settle the bill before leaving.',
+   229→        )
+   230→        setStep('success')
+   231→        toast.success(successMessage, { duration: 4000 })
+   232→        return
+   233→      }
+   234→
+   235→      // Online flow (UPI / QR / CARD / WALLET / NETBANKING / CUSTOM)
+   236→      setStep('processing')
+   237→      const apiMethod = t === 'QR' ? 'UPI' : t
+   238→      const init = await initiate.mutateAsync({
+   239→        orderId,
+   240→        method: apiMethod as any,
+   241→        paymentMethodId: selectedMethod.id,
+   242→      })
+   243→
+   244→      setUpiDeepLink(init.upiDeepLink || null)
+   245→      setUpiQrPayload(init.upiQrPayload || null)
+   246→      setUpiId(init.upiId || null)
+   247→
+   248→      // UPI: open the deep-link (auto-launch customer's UPI app), then wait
+   249→      // for them to return + verify.
+   250→      if (t === 'UPI' && init.upiDeepLink) {
+   251→        const tableToken = new URLSearchParams(window.location.search).get('table') || ''
+   252→        sessionStorage.setItem(`order-${tableToken}`, orderId)
+   253→        sessionStorage.setItem('returning-from-upi', '1')
+   254→        try {
+   255→          window.open(init.upiDeepLink, '_blank')
+   256→        } catch {
+   257→          // popup blocked — fall through to the manual "Open UPI app" button
+   258→        }
+   259→        setStep('upi_launch')
+   260→        await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))
+   261→        await verify.mutateAsync({
+   262→          paymentId: init.paymentId,
+   263→          providerTxnId: init.providerTxnId,
+   264→        })
+   265→        setSuccessMessage('Payment successful! Your order is confirmed.')
+   266→        setStep('success')
+   267→        return
+   268→      }
+   269→
+   270→      // QR: show the QR + UPI ID, wait for the customer to scan + pay, then verify
+   271→      if (t === 'QR' && init.upiQrPayload) {
+   272→        setStep('qr')
+   273→        await new Promise((r) => setTimeout(r, init.verifyInMs || 3000))
+   274→        await verify.mutateAsync({
+   275→          paymentId: init.paymentId,
+   276→          providerTxnId: init.providerTxnId,
+   277→        })
+   278→        setSuccessMessage('Payment successful! Your order is confirmed.')
+   279→        setStep('success')
+   280→        return
+   281→      }
+   282→
+   283→      // CARD / WALLET / NETBANKING / CUSTOM: mock wait, then verify
+   284→      await new Promise((r) => setTimeout(r, init.verifyInMs || 1500))
+   285→      await verify.mutateAsync({
+   286→        paymentId: init.paymentId,
+   287→        providerTxnId: init.providerTxnId,
+   288→      })
+   289→      setSuccessMessage('Payment successful! Your order is confirmed.')
+   290→      setStep('success')
+   291→    } catch (err: any) {
+   292→      // CRITICAL: do NOT silently reset to 'method'. If the order was already
+   293→      // placed, the customer has a placed order in the system — we MUST route
+   294→      // them to the tracking page (or give them an explicit way to retry).
+   295→      //
+   296→      // - If placedOrderId is set (order was created in this sheet OR the sheet
+   297→      //   was opened in existing-order mode) → go to 'error' step which offers
+   298→      //   "Track order" + "Try again" so they're never stuck.
+   299→      // - Otherwise (e.g. placeOrder itself failed) → back to 'method' so they
+   300→      //   can retry selecting a method, but still surface the error.
+   301→      const msg = err?.message || 'Payment failed. Please try again.'
+   302→      setErrorMessage(msg)
+   303→      if (placedOrderId) {
+   304→        setStep('error')
+   305→      } else {
+   306→        setStep('method')
+   307→      }
+   308→      toast.error(msg)
+   309→    }
+   310→  }
+   311→
+   312→  // Auto-redirect to order tracking after success
+   313→  useEffect(() => {
+   314→    if (step === 'success' && placedOrderId) {
+   315→      const t = setTimeout(() => {
+   316→        onCheckoutComplete(placedOrderId)
+   317→      }, 1800)
+   318→      return () => clearTimeout(t)
+   319→    }
+   320→  }, [step, placedOrderId, onCheckoutComplete])
+   321→
+   322→  // Manual redirect from the error step → route to tracking page
+   323→  const goToTracking = () => {
+   324→    if (placedOrderId) {
+   325→      onCheckoutComplete(placedOrderId)
+   326→    }
+   327→  }
+   328→
+   329→  // Retry payment on the SAME order (clears the failed attempt and lets the
+   330→  // customer pick a different method or retry the same one). We keep
+   331→  // placedOrderId intact so `ensureOrderPlaced()` returns the existing order.
+   332→  const retryPayment = () => {
+   333→    setErrorMessage('')
+   334→    setSelectedMethod(null)
+   335→    setUpiDeepLink(null)
+   336→    setUpiQrPayload(null)
+   337→    setUpiId(null)
+   338→    setStep('method')
+   339→  }
+   340→
+   341→  const canPay = !!selectedMethod && (skipCustomerDetails || formValid) && !placeOrder.isPending
+   342→
+   343→  // --------------------------------------------------------------------------
+   344→  // Render
+   345→  // --------------------------------------------------------------------------
+   346→  return (
+   347→    <Sheet
+   348→      open={open}
+   349→      onOpenChange={(o) => {
+   350→        // Block close during processing + success (auto-redirect in flight)
+   351→        if (step === 'processing' || step === 'success') return
+   352→        // If the customer tries to close the sheet during the 'error' step
+   353→        // AND the order was placed, route them to the tracking page instead
+   354→        // of just dismissing — they have an order in the system that they
+   355→        // need to be able to track. Only fall through to a normal close if
+   356→        // there's no placed order (e.g. the initial placeOrder call itself
+   357→        // failed, so there's nothing to track).
+   358→        if (!o && step === 'error' && placedOrderId) {
+   359→          onCheckoutComplete(placedOrderId)
+   360→          return
+   361→        }
+   362→        onOpenChange(o)
+   363→      }}
+   364→    >
+   365→      <SheetContent
+   366→        side="bottom"
+   367→        className="flex max-h-[94vh] flex-col gap-0 rounded-t-3xl border-slate-200 bg-white p-0"
+   368→      >
+   369→        {/* Drag handle */}
+   370→        <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-300" />
+   371→
+   372→        {/* Header — varies by step */}
+   373→        <SheetHeader className="border-b border-slate-100 px-5 pb-3 pt-3">
+   374→          <div className="flex items-center gap-2">
+   375→            {step === 'method' && !skipCustomerDetails && (
+   376→              <button
+   377→                onClick={() => setStep('details')}
+   378→                className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+   379→                aria-label="Back"
+   380→              >
+   381→                <ChevronLeft className="h-5 w-5" />
+   382→              </button>
+   383→            )}
+   384→            <SheetTitle className="text-left text-[16px] font-bold text-slate-900">
+   385→              {stepTitle(step)}
+   386→            </SheetTitle>
+   387→          </div>
+   388→          <SheetDescription className="sr-only">
+   389→            {stepDescription(step)}
+   390→          </SheetDescription>
+   391→        </SheetHeader>
+   392→
+   393→        {/* Body — scrollable */}
+   394→        <div className="flex-1 overflow-y-auto px-5 py-4">
+   395→          <AnimatePresence mode="wait">
+   396→            {/* Step 1: Customer details */}
+   397→            {step === 'details' && (
+   398→              <motion.div
+   399→                key="details"
+   400→                initial={{ opacity: 0, x: 8 }}
+   401→                animate={{ opacity: 1, x: 0 }}
+   402→                exit={{ opacity: 0, x: -8 }}
+   403→                className="space-y-4"
+   404→              >
+   405→                <div className="rounded-xl bg-slate-50 p-3">
+   406→                  <div className="flex items-center justify-between text-[13px]">
+   407→                    <span className="text-slate-500">Paying to</span>
+   408→                    <span className="font-semibold text-slate-800">{restaurant.name}</span>
+   409→                  </div>
+   410→                  <div className="mt-1 flex items-center justify-between text-[13px]">
+   411→                    <span className="text-slate-500">Amount</span>
+   412→                    <span className="text-lg font-extrabold text-slate-900">{totalDisplay}</span>
+   413→                  </div>
+   414→                </div>
+   415→
+   416→                <div className="space-y-3">
+   417→                  <div className="space-y-1.5">
+   418→                    <Label htmlFor="cs-name" className="text-[13px] font-semibold text-slate-700">
+   419→                      Your name <span className="text-red-500">*</span>
+   420→                    </Label>
+   421→                    <Input
+   422→                      id="cs-name"
+   423→                      placeholder="e.g. Arjun Patel"
+   424→                      value={customerName}
+   425→                      onChange={(e) => setCustomerName(e.target.value)}
+   426→                      maxLength={80}
+   427→                      autoFocus
+   428→                      aria-invalid={touched && !nameValid}
+   429→                      className="h-11 rounded-xl border-slate-200 text-[14px] focus-visible:ring-orange-400"
+   430→                    />
+   431→                    {touched && !nameValid && (
+   432→                      <p className="text-[11px] text-red-500">Please enter your name (min 2 characters).</p>
+   433→                    )}
+   434→                  </div>
+   435→
+   436→                  <div className="space-y-1.5">
+   437→                    <Label htmlFor="cs-phone" className="text-[13px] font-semibold text-slate-700">
+   438→                      Phone number <span className="text-red-500">*</span>
+   439→                    </Label>
+   440→                    <Input
+   441→                      id="cs-phone"
+   442→                      inputMode="tel"
+   443→                      placeholder="e.g. +91 98765 43210"
+   444→                      value={customerPhone}
+   445→                      onChange={(e) => setCustomerPhone(e.target.value)}
+   446→                      maxLength={20}
+   447→                      aria-invalid={touched && !phoneValid}
+   448→                      className="h-11 rounded-xl border-slate-200 text-[14px] focus-visible:ring-orange-400"
+   449→                    />
+   450→                    {touched && !phoneValid && (
+   451→                      <p className="text-[11px] text-red-500">Please enter a valid phone number (7–15 digits).</p>
+   452→                    )}
+   453→                  </div>
+   454→                </div>
+   455→
+   456→                <div className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[11px] text-emerald-700">
+   457→                  <ShieldCheck className="h-4 w-4 shrink-0" />
+   458→                  <span>Your details are shared only with the restaurant to fulfil your order.</span>
+   459→                </div>
+   460→              </motion.div>
+   461→            )}
+   462→
+   463→            {/* Step 2: Payment method picker */}
+   464→            {step === 'method' && (
+   465→              <motion.div
+   466→                key="method"
+   467→                initial={{ opacity: 0, x: 8 }}
+   468→                animate={{ opacity: 1, x: 0 }}
+   469→                exit={{ opacity: 0, x: -8 }}
+   470→                className="space-y-4"
+   471→              >
+   472→                {/* Order summary */}
+   473→                <div className="rounded-xl border border-slate-200 bg-white p-3">
+   474→                  <div className="flex items-center justify-between text-[13px]">
+   475→                    <span className="text-slate-500">Item total ({totals.itemCount})</span>
+   476→                    <span className="font-semibold text-slate-700">₹{totals.subtotal.toFixed(0)}</span>
+   477→                  </div>
+   478→                  {totals.taxAmount > 0 && (
+   479→                    <div className="mt-1 flex items-center justify-between text-[13px]">
+   480→                      <span className="text-slate-500">Taxes & GST</span>
+   481→                      <span className="font-semibold text-slate-700">₹{totals.taxAmount.toFixed(0)}</span>
+   482→                    </div>
+   483→                  )}
+   484→                  {totals.serviceCharge > 0 && (
+   485→                    <div className="mt-1 flex items-center justify-between text-[13px]">
+   486→                      <span className="text-slate-500">Service charge</span>
+   487→                      <span className="font-semibold text-slate-700">₹{totals.serviceCharge.toFixed(0)}</span>
+   488→                    </div>
+   489→                  )}
+   490→                  <Separator className="my-2" />
+   491→                  <div className="flex items-center justify-between">
+   492→                    <span className="text-[14px] font-bold text-slate-900">To pay</span>
+   493→                    <span className="text-[16px] font-extrabold text-slate-900">{totalDisplay}</span>
+   494→                  </div>
+   495→                </div>
+   496→
+   497→                <div>
+   498→                  <Label className="mb-2 block text-[13px] font-semibold text-slate-700">
+   499→                    Choose a payment method
+   500→                  </Label>
+   501→                  <PaymentMethodPicker
+   502→                    methods={availableMethods}
+   503→                    onSelect={(m) => setSelectedMethod(m)}
+   504→                    disabled={false}
+   505→                    recommendFirst
+   506→                    selectedMethodId={selectedMethod?.id || null}
+   507→                    hiddenMethodIds={hiddenMethodIds}
+   508→                  />
+   509→                  {availableMethods.length === 0 && (
+   510→                    <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
+   511→                      No payment methods configured for this restaurant yet.
+   512→                      Please ask the staff for assistance.
+   513→                    </p>
+   514→                  )}
+   515→                </div>
+   516→
+   517→                {/* Selected method summary */}
+   518→                {selectedMethod && (
+   519→                  <motion.div
+   520→                    initial={{ opacity: 0, y: 4 }}
+   521→                    animate={{ opacity: 1, y: 0 }}
+   522→                    className="flex items-center justify-between rounded-lg bg-orange-50 p-2.5 text-[12px]"
+   523→                  >
+   524→                    <span className="text-slate-600">Paying with</span>
+   525→                    <span className="font-semibold text-orange-700">{selectedMethod.label}</span>
+   526→                  </motion.div>
+   527→                )}
+   528→
+   529→                <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+   530→                  <Lock className="h-3 w-3" />
+   531→                  <span>Payments are encrypted and processed securely.</span>
+   532→                </div>
+   533→              </motion.div>
+   534→            )}
+   535→
+   536→            {/* Step: UPI launch (waiting for customer to return from UPI app) */}
+   537→            {step === 'upi_launch' && (
+   538→              <motion.div
+   539→                key="upi_launch"
+   540→                initial={{ opacity: 0 }}
+   541→                animate={{ opacity: 1 }}
+   542→                className="flex flex-col items-center gap-3 py-6 text-center"
+   543→              >
+   544→                <Smartphone className="h-12 w-12 text-orange-500" />
+   545→                <p className="text-[14px] font-semibold text-slate-800">
+   546→                  Waiting for payment…
+   547→                </p>
+   548→                <p className="px-6 text-[12px] text-slate-500">
+   549→                  Your UPI app should have opened. Approve the payment of
+   550→                  <strong className="text-slate-900"> {totalDisplay}</strong> there, and we&apos;ll confirm automatically.
+   551→                </p>
+   552→                {upiDeepLink && (
+   553→                  <Button
+   554→                    onClick={() => window.open(upiDeepLink, '_blank')}
+   555→                    variant="outline"
+   556→                    size="sm"
+   557→                    className="mt-2 rounded-xl"
+   558→                  >
+   559→                    Re-open UPI app
+   560→                  </Button>
+   561→                )}
+   562→                {upiId && (
+   563→                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px]">
+   564→                    <span className="text-slate-400">UPI ID:</span>
+   565→                    <code className="font-mono text-slate-700">{upiId}</code>
+   566→                    <button
+   567→                      onClick={() => {
+   568→                        if (upiId) {
+   569→                          navigator.clipboard.writeText(upiId)
+   570→                          toast.success('UPI ID copied')
+   571→                        }
+   572→                      }}
+   573→                      className="text-orange-500 hover:underline"
+   574→                    >
+   575→                      <Copy className="h-3 w-3" />
+   576→                    </button>
+   577→                  </div>
+   578→                )}
+   579→                <div className="flex items-center gap-2 text-[12px] text-slate-400">
+   580→                  <Loader2 className="h-4 w-4 animate-spin" />
+   581→                  Confirming payment…
+   582→                </div>
+   583→              </motion.div>
+   584→            )}
+   585→
+   586→            {/* Step: QR */}
+   587→            {step === 'qr' && upiQrPayload && (
+   588→              <motion.div
+   589→                key="qr"
+   590→                initial={{ opacity: 0 }}
+   591→                animate={{ opacity: 1 }}
+   592→                className="flex flex-col items-center gap-3 py-4 text-center"
+   593→              >
+   594→                <p className="text-[13px] text-slate-600">
+   595→                  Scan this QR with any UPI app to pay
+   596→                  <strong className="text-slate-900"> {totalDisplay}</strong>
+   597→                </p>
+   598→                <div className="rounded-2xl border-2 border-slate-100 bg-white p-4 shadow-sm">
+   599→                  <QrCodeDisplay payload={upiQrPayload} />
+   600→                </div>
+   601→                {upiId && (
+   602→                  <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px]">
+   603→                    <span className="text-slate-400">UPI ID:</span>
+   604→                    <code className="font-mono text-slate-700">{upiId}</code>
+   605→                    <button
+   606→                      onClick={() => {
+   607→                        if (upiId) {
+   608→                          navigator.clipboard.writeText(upiId)
+   609→                          toast.success('UPI ID copied')
+   610→                        }
+   611→                      }}
+   612→                      className="text-orange-500 hover:underline"
+   613→                    >
+   614→                      <Copy className="h-3 w-3" />
+   615→                    </button>
+   616→                  </div>
+   617→                )}
+   618→                <div className="flex items-center gap-2 text-[12px] text-slate-400">
+   619→                  <Loader2 className="h-4 w-4 animate-spin" />
+   620→                  Waiting for payment confirmation…
+   621→                </div>
+   622→              </motion.div>
+   623→            )}
+   624→
+   625→            {/* Step: Generic processing (CARD / WALLET / NETBANKING / CASH) */}
+   626→            {step === 'processing' && !['upi_launch', 'qr'].includes(step) && (
+   627→              <motion.div
+   628→                key="processing"
+   629→                initial={{ opacity: 0 }}
+   630→                animate={{ opacity: 1 }}
+   631→                className="flex flex-col items-center gap-3 py-10 text-center"
+   632→              >
+   633→                {selectedMethod && (() => {
+   634→                  const Icon = ICON_FOR_METHOD[selectedMethod.type] || Smartphone
+   635→                  return <Icon className="h-12 w-12 text-orange-500" />
+   636→                })()}
+   637→                <p className="text-[14px] font-semibold text-slate-800">
+   638→                  {selectedMethod?.type === 'CASH'
+   639→                    ? 'Placing your order…'
+   640→                    : selectedMethod?.type === 'COUNTER'
+   641→                      ? 'Placing your order…'
+   642→                      : selectedMethod?.type === 'PAY_LATER'
+   643→                        ? 'Placing your order…'
+   644→                        : 'Processing payment…'}
+   645→                </p>
+   646→                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+   647→              </motion.div>
+   648→            )}
+   649→
+   650→            {/* Step: Success */}
+   651→            {step === 'success' && (
+   652→              <motion.div
+   653→                key="success"
+   654→                initial={{ opacity: 0, scale: 0.96 }}
+   655→                animate={{ opacity: 1, scale: 1 }}
+   656→                className="flex flex-col items-center gap-3 py-10 text-center"
+   657→              >
+   658→                <motion.div
+   659→                  initial={{ scale: 0 }}
+   660→                  animate={{ scale: 1 }}
+   661→                  transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+   662→                  className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50"
+   663→                >
+   664→                  <CheckCircle2 className="h-8 w-8 text-green-600" />
+   665→                </motion.div>
+   666→                <p className="text-[15px] font-bold text-slate-900">All done!</p>
+   667→                <p className="px-6 text-[13px] text-slate-500">
+   668→                  {successMessage || 'Your order is confirmed.'}
+   669→                </p>
+   670→                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+   671→                <p className="text-[11px] text-slate-400">Redirecting to order tracking…</p>
+   672→              </motion.div>
+   673→            )}
+   674→
+   675→            {/* Step: Error — order placed but payment failed.
+   676→                Give the customer an explicit way to either retry or go to
+   677→                the tracking page. This is the fix for the bug where the
+   678→                tracking page wouldn't load after a payment error. */}
+   679→            {step === 'error' && (
+   680→              <motion.div
+   681→                key="error"
+   682→                initial={{ opacity: 0, scale: 0.96 }}
+   683→                animate={{ opacity: 1, scale: 1 }}
+   684→                className="flex flex-col items-center gap-4 px-2 py-8 text-center"
+   685→              >
+   686→                <motion.div
+   687→                  initial={{ scale: 0 }}
+   688→                  animate={{ scale: 1 }}
+   689→                  transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+   690→                  className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-50"
+   691→                >
+   692→                  <AlertCircle className="h-8 w-8 text-amber-600" />
+   693→                </motion.div>
+   694→                <div className="space-y-1">
+   695→                  <p className="text-[15px] font-bold text-slate-900">
+   696→                    Payment couldn&apos;t be completed
+   697→                  </p>
+   698→                  <p className="px-4 text-[12px] text-slate-500">
+   699→                    {errorMessage
+   700→                      ? `Reason: ${errorMessage}`
+   701→                      : 'Something went wrong while processing your payment.'}
+   702→                  </p>
+   703→                </div>
+   704→
+   705→                {/* Reassurance: only show in initial-placement mode. In
+   706→                    existing-order mode the customer already knew the order
+   707→                    existed — they just wanted to pay for it. */}
+   708→                {!existingOrderId && (
+   709→                  <div className="w-full rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-left">
+   710→                    <p className="text-[12px] font-semibold text-emerald-800">
+   711→                      Good news: your order was placed.
+   712→                    </p>
+   713→                    <p className="mt-0.5 text-[11px] text-emerald-700">
+   714→                      It&apos;s in the kitchen queue. You can retry payment now or
+   715→                      settle it later from the tracking page.
+   716→                    </p>
+   717→                  </div>
+   718→                )}
+   719→
+   720→                {/* Actions — primary = retry, secondary = go to tracking (or close in existing-order mode) */}
+   721→                <div className="flex w-full flex-col gap-2">
+   722→                  <Button
+   723→                    size="lg"
+   724→                    className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/25 transition-all hover:bg-orange-700 active:scale-[0.99]"
+   725→                    onClick={retryPayment}
+   726→                  >
+   727→                    Try a different payment method
+   728→                  </Button>
+   729→                  <Button
+   730→                    variant="outline"
+   731→                    size="lg"
+   732→                    className="h-11 w-full rounded-xl border-slate-300 text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+   733→                    onClick={() => {
+   734→                      // In existing-order mode (bill-view / order-tracking),
+   735→                      // "go to tracking" doesn't apply — just close the sheet
+   736→                      // and refetch so the parent UI reflects the failed state.
+   737→                      if (existingOrderId) {
+   738→                        onCheckoutComplete(placedOrderId || existingOrderId)
+   739→                      } else {
+   740→                        goToTracking()
+   741→                      }
+   742→                    }}
+   743→                  >
+   744→                    {existingOrderId ? 'Close' : 'Go to order tracking'}
+   745→                    {!existingOrderId && <ArrowRight className="ml-2 h-4 w-4" />}
+   746→                  </Button>
+   747→                </div>
+   748→
+   749→                <p className="text-[11px] text-slate-400">
+   750→                  You can also pay later from the tracking page or by asking the waiter.
+   751→                </p>
+   752→              </motion.div>
+   753→            )}
+   754→          </AnimatePresence>
+   755→        </div>
+   756→
+   757→        {/* Footer — sticky CTA (only on details + method steps) */}
+   758→        {(step === 'details' || step === 'method') && (
+   759→          <div className="border-t border-slate-100 bg-white px-5 py-3 pb-6">
+   760→            {step === 'details' && (
+   761→              <Button
+   762→                size="lg"
+   763→                className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/25 transition-all hover:bg-orange-700 active:scale-[0.99]"
+   764→                disabled={!formValid}
+   765→                onClick={() => {
+   766→                  setTouched(true)
+   767→                  if (formValid) setStep('method')
+   768→                }}
+   769→              >
+   770→                Continue to payment · {totalDisplay}
+   771→              </Button>
+   772→            )}
+   773→            {step === 'method' && (
+   774→              <Button
+   775→                size="lg"
+   776→                className="h-12 w-full rounded-xl bg-orange-600 text-[15px] font-bold text-white shadow-lg shadow-orange-600/25 transition-all hover:bg-orange-700 active:scale-[0.99] disabled:opacity-50"
+   777→                disabled={!canPay}
+   778→                onClick={handlePay}
+   779→              >
+   780→                {placeOrder.isPending || initiate.isPending
+   781→                  ? 'Placing order…'
+   782→                  : `Pay ${totalDisplay}`}
+   783→              </Button>
+   784→            )}
+   785→          </div>
+   786→        )}
+   787→      </SheetContent>
+   788→    </Sheet>
+   789→  )
+   790→}
+   791→
+   792→function stepTitle(step: Step): string {
+   793→  switch (step) {
+   794→    case 'details':
+   795→      return 'Checkout'
+   796→    case 'method':
+   797→      return 'Choose payment'
+   798→    case 'upi_launch':
+   799→      return 'Pay via UPI'
+   800→    case 'qr':
+   801→      return 'Scan to pay'
+   802→    case 'processing':
+   803→      return 'Processing'
+   804→    case 'success':
+   805→      return 'Order placed!'
+   806→    case 'error':
+   807→      return 'Payment failed'
+   808→  }
+   809→}
+   810→
+   811→function stepDescription(step: Step): string {
+   812→  return stepTitle(step)
+   813→}
+   814→
+   815→/** Render a QR data URL via the lazy-loaded qrcode lib. */
+   816→function QrCodeDisplay({ payload }: { payload: string }) {
+   817→  const [dataUrl, setDataUrl] = useState<string | null>(null)
+   818→  const [error, setError] = useState(false)
+   819→
+   820→  useEffect(() => {
+   821→    let cancelled = false
+   822→    import('qrcode')
+   823→      .then((QRCode) =>
+   824→        QRCode.toDataURL(payload, {
+   825→          width: 256,
+   826→          margin: 1,
+   827→          color: { dark: '#0f172a', light: '#ffffff' },
+   828→        }),
+   829→      )
+   830→      .then((url: string) => {
+   831→        if (!cancelled) setDataUrl(url)
+   832→      })
+   833→      .catch(() => {
+   834→        if (!cancelled) setError(true)
+   835→      })
+   836→      .catch(() => {
+   837→        if (!cancelled) setError(true)
+   838→      })
+   839→    return () => {
+   840→      cancelled = true
+   841→    }
+   842→  }, [payload])
+   843→
+   844→  if (error) {
+   845→    return (
+   846→      <div className="flex h-48 w-48 items-center justify-center text-center text-xs text-red-500">
+   847→        Failed to generate QR code.
+   848→        <br />
+   849→        Please use the UPI ID directly.
+   850→      </div>
+   851→    )
+   852→  }
+   853→  if (!dataUrl) {
+   854→    return (
+   855→      <div className="flex h-48 w-48 items-center justify-center">
+   856→        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
+   857→      </div>
+   858→    )
+   859→  }
+   860→  return <img src={dataUrl} alt="UPI payment QR code" className="h-48 w-48" />
+   861→}
+   862→

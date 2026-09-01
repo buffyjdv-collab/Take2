@@ -1,0 +1,1112 @@
+     1→// QR-Based Restaurant Quick Order System — Prisma Schema
+     2→// Multi-tenant SaaS platform with RBAC, real-time orders, payments, billing, reports
+     3→
+     4→generator client {
+     5→  provider = "prisma-client-js"
+     6→}
+     7→
+     8→
+     9→
+    10→
+    11→
+    12→
+    13→
+    14→datasource db {
+    15→  provider = "postgresql"
+    16→  url      = env("DATABASE_URL")
+    17→}
+    18→
+    19→// ============================================================================
+    20→// AUTH & USERS & RBAC
+    21→// ============================================================================
+    22→
+    23→model User {
+    24→  id            String   @id @default(cuid())
+    25→  email         String   @unique
+    26→  name          String
+    27→  passwordHash  String
+    28→  phone         String?
+    29→  avatar        String?
+    30→  // Role: SUPER_ADMIN | RESTAURANT_OWNER | MANAGER | KITCHEN_STAFF | WAITER | CASHIER
+    31→  role          String   @default("WAITER")
+    32→  active        Boolean  @default(true)
+    33→  // Tenant isolation: a super admin has no restaurantId; everyone else is scoped
+    34→  restaurantId  String?
+    35→  branchId      String?
+    36→
+    37→  restaurant    Restaurant? @relation("RestaurantStaff", fields: [restaurantId], references: [id], onDelete: Cascade)
+    38→  branch        Branch?     @relation("BranchStaff",   fields: [branchId],   references: [id], onDelete: Cascade)
+    39→
+    40→  ordersHandled  Order[]    @relation("AcceptedOrders")
+    41→  servedOrders   Order[]    @relation("ServedOrders")
+    42→  paymentsProcessed Payment[]
+    43→  auditLogs      AuditLog[]
+    44→  handledServiceRequests ServiceRequest[]
+    45→  sessions       Session[]
+    46→  accounts       Account[]
+    47→  invitationsSent TenantInvitation[] @relation("InvitationsSent")
+    48→  invitationsAccepted TenantInvitation[] @relation("InvitationsAccepted")
+    49→  onboardedRestaurants Restaurant[] @relation("OnboardedBy")
+    50→  verifiedPlatformFeePayments PlatformFeePayment[] @relation("PlatformFeePaymentVerifiedBy")
+    51→  platformFeeConfigUpdates PlatformFeeConfig[] @relation("PlatformFeeConfigUpdatedBy")
+    52→  rbacPermissions RolePermission[]
+    53→  rbacModuleAccess RoleModuleAccess[]
+    54→
+    55→  createdAt DateTime @default(now())
+    56→  updatedAt DateTime @updatedAt
+    57→
+    58→  @@index([restaurantId])
+    59→  @@index([branchId])
+    60→  @@index([role])
+    61→}
+    62→
+    63→// ============================================================================
+    64→// GRANULAR RBAC — managed by SUPER_ADMIN
+    65→// ============================================================================
+    66→// RolePermission: per-role CRUD action permissions on resources (molecular level)
+    67→//   e.g. { role: MANAGER, resource: MENU_ITEM, action: CREATE, allowed: true }
+    68→// If no row exists for a (role, resource, action) tuple, the system falls back
+    69→// to the static PERMISSIONS map in src/lib/auth.ts. Once a row exists, it
+    70→// overrides the static default (allow OR deny).
+    71→model RolePermission {
+    72→  id          String   @id @default(cuid())
+    73→  role        String   // SUPER_ADMIN | RESTAURANT_OWNER | MANAGER | KITCHEN_STAFF | WAITER | CASHIER
+    74→  resource    String   // e.g. MENU_ITEM, ORDER, TABLE, STAFF, REPORTS, SETTINGS, BILLING, PLATFORM, etc.
+    75→  action      String   // CREATE | READ | UPDATE | DELETE (CRUD) or custom (VIEW, MANAGE, VERIFY, etc.)
+    76→  allowed     Boolean  @default(true)
+    77→  updatedBy   String?
+    78→  updatedByUser User?  @relation(fields: [updatedBy], references: [id])
+    79→
+    80→  createdAt   DateTime @default(now())
+    81→  updatedAt   DateTime @updatedAt
+    82→
+    83→  @@unique([role, resource, action])
+    84→  @@index([role])
+    85→  @@index([resource])
+    86→}
+    87→
+    88→// RoleModuleAccess: controls which sidebar modules each role can see.
+    89→//   e.g. { role: MANAGER, moduleKey: 'menu', visible: true }
+    90→// If no row exists for a (role, moduleKey) tuple, the system falls back to the
+    91→// static PERMISSIONS-based check in src/components/sidebar.tsx. Once a row
+    92→// exists, it overrides (visible OR hidden).
+    93→model RoleModuleAccess {
+    94→  id          String   @id @default(cuid())
+    95→  role        String   // SUPER_ADMIN | RESTAURANT_OWNER | MANAGER | KITCHEN_STAFF | WAITER | CASHIER
+    96→  moduleKey   String   // e.g. dashboard, orders, menu, modifiers, tables, kitchen, waiter, billing, reports, staff, settings
+    97→  visible     Boolean  @default(true)
+    98→  updatedBy   String?
+    99→  updatedByUser User?  @relation(fields: [updatedBy], references: [id])
+   100→
+   101→  createdAt   DateTime @default(now())
+   102→  updatedAt   DateTime @updatedAt
+   103→
+   104→  @@unique([role, moduleKey])
+   105→  @@index([role])
+   106→}
+   107→
+   108→// NextAuth required models
+   109→model Account {
+   110→  id                String  @id @default(cuid())
+   111→  userId            String
+   112→  type              String
+   113→  provider          String
+   114→  providerAccountId String
+   115→  refresh_token     String?
+   116→  access_token      String?
+   117→  expires_at        Int?
+   118→  token_type        String?
+   119→  scope             String?
+   120→  id_token          String?
+   121→  session_state     String?
+   122→  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+   123→
+   124→  @@unique([provider, providerAccountId])
+   125→  @@index([userId])
+   126→}
+   127→
+   128→model Session {
+   129→  id           String   @id @default(cuid())
+   130→  sessionToken String   @unique
+   131→  userId       String
+   132→  expires      DateTime
+   133→  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   134→
+   135→  @@index([userId])
+   136→}
+   137→
+   138→model VerificationToken {
+   139→  identifier String
+   140→  token      String   @unique
+   141→  expires    DateTime
+   142→
+   143→  @@unique([identifier, token])
+   144→}
+   145→
+   146→// ============================================================================
+   147→// MULTI-TENANT RESTAURANT MODEL
+   148→// ============================================================================
+   149→
+   150→model Restaurant {
+   151→  id              String   @id @default(cuid())
+   152→  slug            String   @unique   // URL slug used in QR codes
+   153→  name            String
+   154→  logo            String?
+   155→  tagline         String?
+   156→  description     String?
+   157→  address         String
+   158→  city            String?
+   159→  state           String?
+   160→  postalCode      String?
+   161→  phone           String
+   162→  email           String?
+   163→  website         String?
+   164→
+   165→  // Tax & billing
+   166→  gstNumber       String?
+   167→  panNumber       String?
+   168→  currency        String   @default("INR")
+   169→  currencySymbol  String   @default("₹")
+   170→  taxRate         Float    @default(0.05)   // 5% GST default
+   171→  serviceChargeRate Float  @default(0.00)   // optional service charge
+   172→
+   173→  // Hours
+   174→  openingTime     String   @default("09:00")
+   175→  closingTime     String   @default("23:00")
+   176→  isOpen          Boolean  @default(true)
+   177→
+   178→  // Payment methods accepted
+   179→  acceptUpi       Boolean  @default(true)
+   180→  acceptCard      Boolean  @default(true)
+   181→  acceptCash      Boolean  @default(true)
+   182→  acceptCounter   Boolean  @default(true)
+   183→
+   184→  // UPI ID for receiving payments (e.g. restaurant@okhdfcbank)
+   185→  // Used to generate UPI deep links + QR codes for customer payments
+   186→  upiId           String?
+   187→
+   188→  // Theme
+   189→  primaryColor    String   @default("#EA580C")   // warm orange (food-friendly)
+   190→  accentColor     String   @default("#16A34A")    // green for veg indicators
+   191→
+   192→  // Subscription / plan (legacy fields kept for backward compat; canonical source = Subscription model)
+   193→  plan            String   @default("TRIAL")    // TRIAL | STARTER | PRO | ENTERPRISE
+   194→  subscriptionStatus String @default("ACTIVE")
+   195→  trialEndsAt     DateTime?
+   196→  suspendedAt     DateTime?
+   197→  suspendedReason String?
+   198→  onboardedById   String?  // super admin who created this tenant (null = self-signup)
+   199→
+   200→  // Platform fee block — when true, customers cannot scan QR codes to place
+   201→  // orders. Set by the super admin when a restaurant has overdue platform
+   202→  // fees (pending for more than 30 days).
+   203→  platformFeeBlocked   Boolean  @default(false)
+   204→  platformFeeBlockedAt DateTime?
+   205→  platformFeeBlockReason String?
+   206→
+   207→  users           User[]           @relation("RestaurantStaff")
+   208→  branches        Branch[]
+   209→  tables          Table[]
+   210→  menuCategories  MenuCategory[]
+   211→  menuItems       MenuItem[]
+   212→  modifierGroups  ModifierGroup[]
+   213→  orders          Order[]
+   214→  customers       Customer[]
+   215→  payments        Payment[]
+   216→  invoices        Invoice[]
+   217→  serviceRequests ServiceRequest[]
+   218→  settings        RestaurantSettings?
+   219→  auditLogs       AuditLog[]
+   220→  subscription    Subscription?
+   221→  invitations     TenantInvitation[]
+   222→  onboardedBy     User?       @relation("OnboardedBy", fields: [onboardedById], references: [id])
+   223→  platformFees    PlatformFee[]
+   224→  paymentMethods  RestaurantPaymentMethod[]
+   225→  feePayments     PlatformFeePayment[]
+   226→  feePaymentRequests PlatformFeePaymentRequest[]
+   227→
+   228→  createdAt DateTime @default(now())
+   229→  updatedAt DateTime @updatedAt
+   230→}
+   231→
+   232→// ============================================================================
+   233→// RESTAURANT PAYMENT METHODS (Zepto-style configurable payment options)
+   234→// ============================================================================
+   235→// Each row = one payment option offered by a restaurant at checkout.
+   236→// A restaurant can configure label, description, icon, accent color, priority,
+   237→// and a JSON `config` blob for provider-specific settings (e.g. UPI VPA,
+   238→// Razorpay key ID, etc.). The `type` field drives the customer-facing flow.
+   239→//
+   240→// Type values:
+   241→//   UPI         → UPI deep-link + QR fallback
+   242→//   QR          → Standalone QR (renders a QR for the configured payload)
+   243→//   CARD        → Credit / Debit card (mock provider)
+   244→//   WALLET      → Mobile wallet (PhonePe / Paytm / Mobikwik etc.)
+   245→//   NETBANKING  → Net banking redirect (mock)
+   246→//   CASH        → Pay cash to waiter / counter staff
+   247→//   COUNTER     → Pay at counter (cash or card, in person)
+   248→//   PAY_LATER   → Pay-later / Tab (post-paid, settled at end of meal)
+   249→//   CUSTOM      → Restaurant-defined flow (renders as informational card)
+   250→model RestaurantPaymentMethod {
+   251→  id            String   @id @default(cuid())
+   252→  restaurantId  String
+   253→
+   254→  // Canonical type — drives the customer-facing payment flow.
+   255→  // See model comment above for the value set.
+   256→  type          String
+   257→
+   258→  // Display label shown to customers (e.g. "UPI", "PhonePe", "Pay at counter")
+   259→  label         String
+   260→  // Short helper text shown under the label (e.g. "GPay / PhonePe / Paytm")
+   261→  description   String?
+   262→  // Lucide icon name (e.g. "Smartphone", "CreditCard", "Banknote", "Wallet",
+   263→  // "Building", "QrCode", "Clock"). UI falls back to a default if missing.
+   264→  icon          String?
+   265→  // Tailwind-friendly hex color used for the icon chip (e.g. "#EA580C")
+   266→  accentColor   String   @default("#64748B")
+   267→
+   268→  // Whether this method is shown to customers at checkout
+   269→  active        Boolean  @default(true)
+   270→  // Sort order — lower numbers appear first in the customer picker
+   271→  priority      Int      @default(100)
+   272→
+   273→  // JSON blob with provider-specific config:
+   274→  //   UPI  → { upiId: "restaurant@okhdfcbank" }
+   275→  //   CARD → { provider: "RAZORPAY" | "STRIPE" | "MOCK",KeyId?: "...", keySecret?: "..." }
+   276→  //   WALLET → { provider: "PHONEPE" | "PAYTM" | "MOBIKWIK" | "MOCK" }
+   277→  //   QR → { payload: "upi://..." | override }
+   278→  config        Json?
+   279→
+   280→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   281→
+   282→  createdAt DateTime @default(now())
+   283→  updatedAt DateTime @updatedAt
+   284→
+   285→  @@index([restaurantId])
+   286→  @@index([restaurantId, active])
+   287→}
+   288→
+   289→model Branch {
+   290→  id            String   @id @default(cuid())
+   291→  restaurantId  String
+   292→  name          String   // e.g. "Downtown", "Airport"
+   293→  address       String
+   294→  phone         String?
+   295→  active        Boolean  @default(true)
+   296→
+   297→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   298→  users         User[]     @relation("BranchStaff")
+   299→  tables        Table[]
+   300→  orders        Order[]
+   301→
+   302→  createdAt DateTime @default(now())
+   303→  updatedAt DateTime @updatedAt
+   304→
+   305→  @@index([restaurantId])
+   306→}
+   307→
+   308→// ============================================================================
+   309→// TABLES & QR CODES
+   310→// ============================================================================
+   311→
+   312→model Table {
+   313→  id            String   @id @default(cuid())
+   314→  restaurantId  String
+   315→  branchId      String?
+   316→  number        String   // Display number e.g. "T1", "5", "Patio-2"
+   317→  label         String?  // Optional friendly name
+   318→  capacity      Int      @default(4)
+   319→  active        Boolean  @default(true)
+   320→  qrCodeToken   String   @unique   // random token used in QR URL for security
+   321→  // Status: AVAILABLE | OCCUPIED | ORDERING | FOOD_PREPARING | BILL_REQUESTED | PAYMENT_PENDING | COMPLETED
+   322→  status        String   @default("AVAILABLE")
+   323→
+   324→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   325→  branch        Branch?    @relation(fields: [branchId],   references: [id], onDelete: SetNull)
+   326→  orders        Order[]
+   327→  serviceRequests ServiceRequest[]
+   328→
+   329→  createdAt DateTime @default(now())
+   330→  updatedAt DateTime @updatedAt
+   331→
+   332→  @@unique([restaurantId, number])
+   333→  @@index([restaurantId])
+   334→  @@index([status])
+   335→}
+   336→
+   337→// ============================================================================
+   338→// MENU STRUCTURE (categories → items → variants & modifiers)
+   339→// ============================================================================
+   340→
+   341→model MenuCategory {
+   342→  id            String   @id @default(cuid())
+   343→  restaurantId  String
+   344→  name          String   // Starters, Biryani, Main Course, Breads, Beverages, Desserts
+   345→  description   String?
+   346→  icon          String?  // emoji or icon name
+   347→  sortOrder     Int      @default(0)
+   348→  active        Boolean  @default(true)
+   349→
+   350→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   351→  menuItems     MenuItem[]
+   352→
+   353→  createdAt DateTime @default(now())
+   354→  updatedAt DateTime @updatedAt
+   355→
+   356→  @@index([restaurantId])
+   357→}
+   358→
+   359→model MenuItem {
+   360→  id            String   @id @default(cuid())
+   361→  restaurantId  String
+   362→  categoryId    String
+   363→  name          String
+   364→  description   String?
+   365→  image         String?  // URL or base64
+   366→  // Type
+   367→  isVeg         Boolean  @default(true)
+   368→  isSpicy       Boolean  @default(false)
+   369→  // Pricing
+   370→  basePrice     Float    // in INR
+   371→  taxRate       Float    @default(0.05)  // overrides restaurant default if needed
+   372→  // State
+   373→  available     Boolean  @default(true)
+   374→  soldOut       Boolean  @default(false)
+   375→  // Featured / popular
+   376→  isFeatured    Boolean  @default(false)
+   377→  isPopular     Boolean  @default(false)
+   378→  // Scheduling
+   379→  availableFrom String?  // "09:00"
+   380→  availableTo   String?  // "23:00"
+   381→  // Tags
+   382→  tags          String?  // comma-separated: "bestseller, chef-special"
+   383→  sortOrder     Int      @default(0)
+   384→  // Prep time estimate (minutes)
+   385→  prepTime      Int      @default(15)
+   386→
+   387→  restaurant    Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   388→  category      MenuCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+   389→  variants      MenuVariant[]
+   390→  modifierGroups ModifierGroup[] @relation("ItemModifierGroups")
+   391→  orderItems    OrderItem[]
+   392→
+   393→  createdAt DateTime @default(now())
+   394→  updatedAt DateTime @updatedAt
+   395→
+   396→  @@index([restaurantId])
+   397→  @@index([categoryId])
+   398→  @@index([available])
+   399→  @@index([soldOut])
+   400→}
+   401→
+   402→model MenuVariant {
+   403→  id            String   @id @default(cuid())
+   404→  menuItemId    String
+   405→  name          String   // Regular, Large, Half, Full
+   406→  priceModifier Float    @default(0)   // additive (e.g. +50 for Large)
+   407→  sortOrder     Int      @default(0)
+   408→  isDefault     Boolean  @default(false)
+   409→
+   410→  menuItem      MenuItem  @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+   411→  orderItems    OrderItem[]
+   412→
+   413→  createdAt DateTime @default(now())
+   414→  @@index([menuItemId])
+   415→}
+   416→
+   417→// Modifier groups: e.g. "Add-ons", "Spice Level", "Size", "Sauces"
+   418→model ModifierGroup {
+   419→  id            String   @id @default(cuid())
+   420→  restaurantId  String
+   421→  menuItemId    String?  // null = available restaurant-wide
+   422→  name          String   // "Add-ons", "Spice Level"
+   423→  description   String?
+   424→  // Selection type: SINGLE | MULTIPLE
+   425→  selectionType String   @default("SINGLE")
+   426→  required      Boolean  @default(false)
+   427→  minSelection  Int      @default(0)
+   428→  maxSelection  Int      @default(1)
+   429→  sortOrder     Int      @default(0)
+   430→
+   431→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   432→  menuItem      MenuItem?  @relation("ItemModifierGroups", fields: [menuItemId], references: [id], onDelete: Cascade)
+   433→  modifiers     Modifier[]
+   434→
+   435→  createdAt DateTime @default(now())
+   436→  @@index([restaurantId])
+   437→  @@index([menuItemId])
+   438→}
+   439→
+   440→model Modifier {
+   441→  id            String   @id @default(cuid())
+   442→  groupId       String
+   443→  name          String   // "Extra Cheese", "Medium Spicy"
+   444→  price         Float    @default(0)
+   445→  isDefault     Boolean  @default(false)
+   446→  active        Boolean  @default(true)
+   447→  sortOrder     Int      @default(0)
+   448→
+   449→  group         ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+   450→  orderItemModifiers OrderItemModifier[]
+   451→
+   452→  createdAt DateTime @default(now())
+   453→  @@index([groupId])
+   454→}
+   455→
+   456→// ============================================================================
+   457→// CUSTOMERS (lightweight — no account required to order)
+   458→// ============================================================================
+   459→
+   460→model Customer {
+   461→  id            String   @id @default(cuid())
+   462→  restaurantId  String
+   463→  name          String?
+   464→  phone         String?
+   465→  email         String?
+   466→  // Optional session identifier for guests
+   467→  sessionToken  String?
+   468→
+   469→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   470→  orders        Order[]
+   471→
+   472→  createdAt DateTime @default(now())
+   473→  updatedAt DateTime @updatedAt
+   474→
+   475→  @@index([restaurantId])
+   476→  @@index([phone])
+   477→}
+   478→
+   479→// ============================================================================
+   480→// ORDERS & ORDER ITEMS
+   481→// ============================================================================
+   482→
+   483→model Order {
+   484→  id            String   @id @default(cuid())
+   485→  orderNumber   String   // human-friendly: SG-000001
+   486→  restaurantId  String
+   487→  branchId      String?
+   488→  tableId       String
+   489→  customerId    String?
+   490→  // Status: PENDING_PAYMENT | NEW | ACCEPTED | PREPARING | READY | SERVED | COMPLETED | CANCELLED
+   491→  // PENDING_PAYMENT = customer placed the order but hasn't paid yet (pre-payment mode).
+   492→  //   The order is hidden from the kitchen/orders module until payment is confirmed,
+   493→  //   at which point it transitions to NEW and becomes visible for acceptance.
+   494→  status        String   @default("NEW")
+   495→  // Payment status: PENDING | PROCESSING | PAID | FAILED | REFUNDED
+   496→  paymentStatus String   @default("PENDING")
+   497→  // Payment method: UPI | CARD | CASH | COUNTER | WALLET
+   498→  paymentMethod String?
+   499→  // ID of the RestaurantPaymentMethod row the customer chose at order placement.
+   500→  // Used by the post-serve payment picker to hide the same option (e.g. "Pay in cash"
+   501→  // already chosen — don't show it again). Null for legacy orders / when no method
+   502→  // was recorded at placement time.
+   503→  paymentMethodId String?
+   504→
+   505→  // Special instructions from customer
+   506→  notes         String?
+   507→  // Idempotency key to prevent duplicate order submission
+   508→  idempotencyKey String? @unique
+   509→
+   510→  // Customer snapshot (captured at order placement so the restaurant always
+   511→  // has the name & phone even if the Customer record is later deleted)
+   512→  customerName  String?
+   513→  customerPhone String?
+   514→
+   515→  // Payment timing flags (set by restaurant owner)
+   516→  // prePaymentRequested: restaurant asks customer to pay BEFORE the order is accepted
+   517→  // postPaymentRequested: restaurant asks customer to pay AFTER the order is received (served)
+   518→  prePaymentRequested  Boolean  @default(false)
+   519→  postPaymentRequested Boolean  @default(false)
+   520→  prePaymentRequestedAt  DateTime?
+   521→  postPaymentRequestedAt DateTime?
+   522→
+   523→  // Who marked a CASH payment as received (waiter / owner / manager / cashier).
+   524→  // When a cash payment is collected, the user's id + name snapshot are stored
+   525→  // so the payments report can attribute the collection to a specific person.
+   526→  cashReceivedById   String?
+   527→  cashReceivedByName String?
+   528→  cashReceivedAt     DateTime?
+   529→
+   530→  // Pricing (server-validated)
+   531→  subtotal      Float    @default(0)
+   532→  taxAmount     Float    @default(0)
+   533→  serviceCharge Float    @default(0)
+   534→  discountAmount Float   @default(0)
+   535→  discountCode  String?
+   536→  refundAmount  Float    @default(0)   // amount refunded (partial or full)
+   537→  refundedAt    DateTime?
+   538→  refundReason  String?
+   539→  grandTotal    Float    @default(0)   // original grand total (pre-refund)
+   540→  netTotal      Float    @default(0)   // grandTotal - refundAmount (actual collected)
+   541→
+   542→  // Platform fee snapshot (stored at order time for audit)
+   543→  platformFeeAmount Float @default(0)
+   544→  platformFeeBase   Float @default(0)   // the base the fee was calculated on
+   545→  platformFeePayer  String? // RESTAURANT | CUSTOMER | SPLIT
+   546→
+   547→  // Staff who handled the order
+   548→  acceptedById  String?
+   549→  servedById    String?
+   550→
+   551→  // Timing
+   552→  placedAt      DateTime @default(now())
+   553→  acceptedAt    DateTime?
+   554→  preparingAt   DateTime?
+   555→  readyAt       DateTime?
+   556→  servedAt      DateTime?
+   557→  completedAt   DateTime?
+   558→  cancelledAt   DateTime?
+   559→
+   560→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   561→  branch        Branch?    @relation(fields: [branchId],   references: [id], onDelete: SetNull)
+   562→  table         Table      @relation(fields: [tableId],    references: [id], onDelete: Cascade)
+   563→  customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+   564→  acceptedBy    User?      @relation("AcceptedOrders", fields: [acceptedById], references: [id])
+   565→  servedBy      User?      @relation("ServedOrders",   fields: [servedById],   references: [id])
+   566→  items         OrderItem[]
+   567→  payments      Payment[]
+   568→  invoices      Invoice[]
+   569→  serviceRequests ServiceRequest[]
+   570→  platformFee   PlatformFee?
+   571→
+   572→  createdAt DateTime @default(now())
+   573→  updatedAt DateTime @updatedAt
+   574→
+   575→  @@index([restaurantId])
+   576→  @@index([tableId])
+   577→  @@index([status])
+   578→  @@index([paymentStatus])
+   579→  @@index([placedAt])
+   580→}
+   581→
+   582→model OrderItem {
+   583→  id            String   @id @default(cuid())
+   584→  orderId       String
+   585→  menuItemId    String
+   586→  menuItemName  String   // snapshot at order time
+   587→  menuItemImage String?
+   588→  variantId     String?
+   589→  variantName   String?
+   590→  quantity      Int      @default(1)
+   591→  // Pricing per unit (server-validated)
+   592→  basePrice     Float
+   593→  variantPrice  Float    @default(0)
+   594→  modifiersTotal Float   @default(0)
+   595→  unitPrice     Float    // basePrice + variantPrice + modifiersTotal
+   596→  totalPrice    Float    // unitPrice * quantity
+   597→  // Snapshot
+   598→  isVeg         Boolean
+   599→  notes         String?  // per-item notes
+   600→
+   601→  order         Order    @relation(fields: [orderId],     references: [id], onDelete: Cascade)
+   602→  menuItem      MenuItem @relation(fields: [menuItemId],  references: [id])
+   603→  variant       MenuVariant? @relation(fields: [variantId], references: [id])
+   604→  modifiers     OrderItemModifier[]
+   605→
+   606→  createdAt DateTime @default(now())
+   607→  @@index([orderId])
+   608→  @@index([menuItemId])
+   609→}
+   610→
+   611→model OrderItemModifier {
+   612→  id            String   @id @default(cuid())
+   613→  orderItemId   String
+   614→  modifierId    String
+   615→  modifierName  String
+   616→  groupName     String
+   617→  price         Float    @default(0)
+   618→
+   619→  orderItem     OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+   620→  modifier      Modifier  @relation(fields: [modifierId], references: [id])
+   621→
+   622→  @@index([orderItemId])
+   623→}
+   624→
+   625→// ============================================================================
+   626→// PAYMENTS & INVOICES
+   627→// ============================================================================
+   628→
+   629→model Payment {
+   630→  id            String   @id @default(cuid())
+   631→  orderId       String
+   632→  restaurantId  String
+   633→  // Method: UPI | CARD | CASH | COUNTER | WALLET
+   634→  method        String
+   635→  // Status: PENDING | PROCESSING | PAID | FAILED | REFUNDED
+   636→  status        String   @default("PENDING")
+   637→  amount        Float
+   638→  currency      String   @default("INR")
+   639→  // Provider reference (for online payments)
+   640→  provider      String?  // RAZORPAY | PHONEPE | PAYTM | STRIPE | CASH | COUNTER
+   641→  providerTxnId String?
+   642→  providerRef   String?
+   643→  // Idempotency
+   644→  idempotencyKey String? @unique
+   645→  // Verification
+   646→  verifiedAt    DateTime?
+   647→  verifiedById  String?
+   648→  failureReason String?
+   649→
+   650→  // Metadata
+   651→  rawResponse   String?
+   652→
+   653→  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+   654→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   655→  verifiedBy    User?    @relation(fields: [verifiedById], references: [id])
+   656→
+   657→  createdAt DateTime @default(now())
+   658→  updatedAt DateTime @updatedAt
+   659→
+   660→  @@index([orderId])
+   661→  @@index([restaurantId])
+   662→  @@index([status])
+   663→}
+   664→
+   665→model Invoice {
+   666→  id            String   @id @default(cuid())
+   667→  invoiceNumber String   @unique  // SG-INV-000001
+   668→  orderId       String
+   669→  restaurantId  String
+   670→  // Snapshot of restaurant details at billing time
+   671→  restaurantName String
+   672→  restaurantAddress String
+   673→  restaurantGst  String?
+   674→  restaurantPhone String
+   675→  // Snapshot of order
+   676→  tableNumber   String
+   677→  orderNumber   String
+   678→  // Totals
+   679→  subtotal      Float
+   680→  taxAmount     Float
+   681→  serviceCharge Float
+   682→  discountAmount Float
+   683→  grandTotal    Float
+   684→  // Payment
+   685→  paymentMethod String?
+   686→  paymentStatus String
+   687→  // Customer
+   688→  customerName  String?
+   689→  customerPhone String?
+   690→
+   691→  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+   692→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   693→
+   694→  issuedAt DateTime @default(now())
+   695→  @@index([orderId])
+   696→  @@index([restaurantId])
+   697→}
+   698→
+   699→// ============================================================================
+   700→// SERVICE REQUESTS (call waiter, request bill)
+   701→// ============================================================================
+   702→
+   703→model ServiceRequest {
+   704→  id            String   @id @default(cuid())
+   705→  restaurantId  String
+   706→  tableId       String
+   707→  orderId       String?
+   708→  // Type: CALL_WAITER | REQUEST_BILL | WATER | CLEANUP | CUSTOM
+   709→  type          String
+   710→  status        String   @default("PENDING")  // PENDING | ACKNOWLEDGED | COMPLETED
+   711→  notes         String?
+   712→  handledById   String?
+   713→
+   714→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   715→  table         Table      @relation(fields: [tableId], references: [id])
+   716→  order         Order?     @relation(fields: [orderId], references: [id])
+   717→  handledBy     User?      @relation(fields: [handledById], references: [id])
+   718→
+   719→  createdAt DateTime @default(now())
+   720→  resolvedAt DateTime?
+   721→
+   722→  @@index([restaurantId, status])
+   723→  @@index([tableId])
+   724→}
+   725→
+   726→// ============================================================================
+   727→// NOTIFICATIONS & AUDIT
+   728→// ============================================================================
+   729→
+   730→model Notification {
+   731→  id            String   @id @default(cuid())
+   732→  restaurantId  String
+   733→  // Target audience: KITCHEN | WAITER | CUSTOMER | ADMIN
+   734→  target        String
+   735→  // Type: NEW_ORDER | ORDER_ACCEPTED | ORDER_PREPARING | ORDER_READY | ORDER_SERVED | PAYMENT_CONFIRMED | BILL_READY | SERVICE_REQUEST
+   736→  type          String
+   737→  title         String
+   738→  message       String
+   739→  // Related entities
+   740→  orderId       String?
+   741→  tableId       String?
+   742→  // Delivery
+   743→  read          Boolean  @default(false)
+   744→  readAt        DateTime?
+   745→
+   746→  createdAt DateTime @default(now())
+   747→  @@index([restaurantId, target, read])
+   748→  @@index([createdAt])
+   749→}
+   750→
+   751→model RestaurantSettings {
+   752→  id            String   @id @default(cuid())
+   753→  restaurantId  String   @unique
+   754→  // Digital receipt config
+   755→  receiptHeader String?
+   756→  receiptFooter String?
+   757→  showLogoOnReceipt Boolean @default(true)
+   758→  // Notification preferences
+   759→  notifyKitchenOnNewOrder   Boolean @default(true)
+   760→  notifyWaiterOnBillRequest Boolean @default(true)
+   761→  playSoundOnNewOrder       Boolean @default(true)
+   762→  // Auto-accept orders
+   763→  autoAcceptOrders          Boolean @default(false)
+   764→  // Allow customer to call waiter
+   765→  allowCallWaiter           Boolean @default(true)
+   766→  // Allow customer to request bill
+   767→  allowRequestBill          Boolean @default(true)
+   768→  // Max items per order
+   769→  maxItemsPerOrder          Int     @default(50)
+   770→  // Tax inclusive pricing
+   771→  taxInclusive              Boolean @default(false)
+   772→
+   773→  // Payment collection timing controls (managed by restaurant owner)
+   774→  // allowPrePayment:  owner can require payment BEFORE accepting the order
+   775→  // allowPostPayment: owner can require payment AFTER the order is received (served)
+   776→  allowPrePayment           Boolean @default(true)
+   777→  allowPostPayment          Boolean @default(true)
+   778→  // Default behaviour for new orders:
+   779→  // requirePrePayment:  automatically request pre-payment when a new order arrives
+   780→  // requirePostPayment: automatically request post-payment when an order is served
+   781→  requirePrePayment         Boolean @default(false)
+   782→  requirePostPayment        Boolean @default(false)
+   783→
+   784→  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   785→
+   786→  createdAt DateTime @default(now())
+   787→  updatedAt DateTime @updatedAt
+   788→}
+   789→
+   790→model AuditLog {
+   791→  id            String   @id @default(cuid())
+   792→  restaurantId  String?
+   793→  userId        String?
+   794→  action        String   // CREATE | UPDATE | DELETE | LOGIN | LOGOUT | STATUS_CHANGE
+   795→  entity        String   // ORDER | MENU_ITEM | TABLE | USER | PAYMENT | etc.
+   796→  entityId      String?
+   797→  details       String?  // JSON string of changes
+   798→  ipAddress     String?
+   799→  userAgent     String?
+   800→
+   801→  restaurant    Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+   802→  user          User?       @relation(fields: [userId], references: [id])
+   803→
+   804→  createdAt DateTime @default(now())
+   805→  @@index([restaurantId])
+   806→  @@index([userId])
+   807→  @@index([entity, entityId])
+   808→}
+   809→
+   810→// ============================================================================
+   811→// MULTI-TENANT BUSINESS MODELS (subscriptions, plans, invitations, platform)
+   812→// ============================================================================
+   813→
+   814→model Subscription {
+   815→  id              String   @id @default(cuid())
+   816→  restaurantId    String   @unique
+   817→  // Plan tier: TRIAL | STARTER | PRO | ENTERPRISE
+   818→  plan            String   @default("TRIAL")
+   819→  // Status: ACTIVE | PAST_DUE | CANCELLED | SUSPENDED | TRIALING
+   820→  status          String   @default("TRIALING")
+   821→  // Billing cycle: MONTHLY | YEARLY
+   822→  billingCycle    String   @default("MONTHLY")
+   823→  // Pricing (in INR paise to avoid float; convert /100 for display)
+   824→  amount          Int      @default(0)
+   825→  currency        String   @default("INR")
+   826→  // Period
+   827→  currentPeriodStart DateTime?
+   828→  currentPeriodEnd   DateTime?
+   829→  trialStartsAt     DateTime?
+   830→  trialEndsAt       DateTime?
+   831→  // Cancellation
+   832→  cancelledAt       DateTime?
+   833→  cancelReason      String?
+   834→  // Payment provider (for future expansion)
+   835→  provider          String?  // RAZORPAY | STRIPE
+   836→  providerSubId     String?
+   837→  // Auto-renew
+   838→  autoRenew         Boolean  @default(true)
+   839→
+   840→  restaurant        Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   841→
+   842→  createdAt DateTime @default(now())
+   843→  updatedAt DateTime @updatedAt
+   844→}
+   845→
+   846→model TenantInvitation {
+   847→  id            String   @id @default(cuid())
+   848→  email         String
+   849→  restaurantId  String?
+   850→  // Role the invitee will get once they accept
+   851→  role          String   @default("RESTAURANT_OWNER")
+   852→  // Token for secure acceptance
+   853→  token         String   @unique
+   854→  // Status: PENDING | ACCEPTED | EXPIRED | REVOKED
+   855→  status        String   @default("PENDING")
+   856→  invitedById   String
+   857→  expiresAt     DateTime
+   858→  acceptedAt    DateTime?
+   859→  acceptedById  String?
+   860→
+   861→  restaurant    Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   862→  invitedBy     User        @relation("InvitationsSent", fields: [invitedById], references: [id])
+   863→  acceptedBy    User?       @relation("InvitationsAccepted", fields: [acceptedById], references: [id])
+   864→
+   865→  createdAt DateTime @default(now())
+   866→  @@index([email])
+   867→  @@index([restaurantId])
+   868→  @@index([status])
+   869→}
+   870→
+   871→model PlatformSettings {
+   872→  id            String   @id @default(cuid())
+   873→  // Global platform config (singleton row)
+   874→  platformName  String   @default("QR Dine")
+   875→  supportEmail  String   @default("support@qrdine.com")
+   876→  // Default trial duration (days)
+   877→  defaultTrialDays Int   @default(14)
+   878→  // Default plan when a new tenant signs up
+   879→  defaultPlan   String   @default("TRIAL")
+   880→  // Whether public signup is enabled
+   881→  publicSignupEnabled Boolean @default(true)
+   882→  // Featured plans on the pricing page
+   883→  featuredPlans String   @default("STARTER,PRO")
+   884→  // Platform commission percentage on each transaction (future)
+   885→  commissionRate Float   @default(0.0)
+   886→  // Branding
+   887→  primaryColor  String   @default("#EA580C")
+   888→  logoUrl       String?
+   889→
+   890→  createdAt DateTime @default(now())
+   891→  updatedAt DateTime @updatedAt
+   892→}
+   893→
+   894→// ============================================================================
+   895→// PLATFORM FEE / COMMISSION SYSTEM
+   896→// ============================================================================
+   897→
+   898→model PlatformFeeConfig {
+   899→  id              String   @id @default(cuid())
+   900→  // Singleton — only one row exists
+   901→  // Fee Type: PERCENTAGE | FIXED_PER_ORDER | MONTHLY_SUBSCRIPTION | HYBRID
+   902→  feeType         String   @default("PERCENTAGE")
+   903→  // For PERCENTAGE: 0.5 means 0.5%
+   904→  // For FIXED_PER_ORDER: amount in paise (e.g. 500 = ₹5)
+   905→  // For MONTHLY_SUBSCRIPTION: monthly amount in paise
+   906→  // For HYBRID: percentage + fixed amount both apply
+   907→  percentageRate  Float    @default(0.5)   // %
+   908→  fixedAmount     Int      @default(0)     // paise
+   909→  monthlyAmount   Int      @default(0)     // paise (for monthly subscription)
+   910→
+   911→  // Fee Applies To: FOOD_SUBTOTAL | DISCOUNTED_SUBTOTAL | TOTAL_EXCLUDING_TAX | TOTAL_INCLUDING_TAX
+   912→  appliesTo       String   @default("TOTAL_EXCLUDING_TAX")
+   913→
+   914→  // Caps (in paise; null = no cap)
+   915→  minimumFee      Int      @default(0)     // paise
+   916→  maximumFee      Int?                     // paise; null = unlimited
+   917→
+   918→  // Who Pays: RESTAURANT | CUSTOMER | SPLIT
+   919→  payer           String   @default("RESTAURANT")
+   920→  // For SPLIT mode: percentage paid by customer (rest by restaurant)
+   921→  customerSplitPct Float   @default(50)    // 0-100
+   922→
+   923→  // Per-plan overrides (JSON string): { "TRIAL": {feeType, percentageRate, ...}, ... }
+   924→  // If a plan key is present, it overrides the global config for that plan
+   925→  planOverrides   String?
+   926→
+   927→  // Status
+   928→  active          Boolean  @default(true)
+   929→  updatedAt       DateTime @updatedAt
+   930→  updatedById     String?
+   931→
+   932→  updatedBy       User?    @relation("PlatformFeeConfigUpdatedBy", fields: [updatedById], references: [id])
+   933→}
+   934→
+   935→model PlatformFee {
+   936→  id              String   @id @default(cuid())
+   937→  orderId         String   @unique
+   938→  restaurantId    String
+   939→  // Snapshot of config at time of order
+   940→  feeType         String
+   941→  percentageRate  Float    @default(0)
+   942→  fixedAmount     Int      @default(0)
+   943→  // Calculation
+   944→  baseAmount      Float    // the base the fee was calculated on (in rupees)
+   945→  grossFee        Float    // fee before min/max caps
+   946→  feeAmount       Float    // final fee after caps (in rupees)
+   947→  payer           String   // RESTAURANT | CUSTOMER | SPLIT
+   948→  customerPortion Float    @default(0)   // portion paid by customer
+   949→  restaurantPortion Float  @default(0)   // portion paid by restaurant
+   950→  // Status: PENDING | COLLECTED | REFUNDED | WAIVED
+   951→  status          String   @default("PENDING")
+   952→  collectedAt     DateTime?
+   953→  refundedAt      DateTime?
+   954→  refundReason    String?
+   955→
+   956→  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+   957→  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+   958→  coveredByPayments PlatformFeeCoveredEntry[]
+   959→
+   960→  createdAt DateTime @default(now())
+   961→  updatedAt DateTime @updatedAt
+   962→
+   963→  @@index([restaurantId])
+   964→  @@index([status])
+   965→  @@index([createdAt])
+   966→}
+   967→
+   968→// ============================================================================
+   969→// PLATFORM FEE PAYMENTS — end-to-end platform fee collection system
+   970→// ============================================================================
+   971→// When a restaurant pays its accumulated platform fees to the platform
+   972→// operator (super admin), a PlatformFeePayment row records the lump-sum
+   973→// payment. The payment covers a set of underlying PlatformFee rows (the
+   974→// per-order PENDING fees that the restaurant is settling).
+   975→//
+   976→// Lifecycle:
+   977→//   1. Super admin sends a PlatformFeePaymentRequest to a tenant with the
+   978→//      requested amount, due date, and note. Status = PENDING.
+   979→//   2. The tenant sees the request in their Settings → Platform Fees tab
+   980→//      and taps "Pay now" — they choose a payment method (UPI / Card /
+   981→//      Wallet / Net banking) and submit. A PlatformFeePayment row is
+   982→//      created with status = PROCESSING.
+   983→//   3. The platform verifies the payment (mock for UPI/CARD/etc.; real
+   984→//      gateway integration point) and the PlatformFeePayment transitions
+   985→//      to PAID. The covered PlatformFee rows are marked COLLECTED in bulk.
+   986→//   4. Realtime events fire at each step:
+   987→//        platform:feeRequested   → step 1 (admin → tenant)
+   988→//        platform:feePaymentInit → step 2 (tenant → admin)
+   989→//        platform:feePaid        → step 3 (system → both parties)
+   990→//        platform:feeCollected  → step 3 (system → both parties, per fee)
+   991→//
+   992→// Super admin can also do a "manual collect" (mark fees as collected
+   993→// without a payment) for offline settlements — status = COLLECTED_DIRECT.
+   994→
+   995→model PlatformFeePayment {
+   996→  id              String   @id @default(cuid())
+   997→  restaurantId    String
+   998→  // Amount in rupees (lump sum)
+   999→  amount          Float
+  1000→  // Method: UPI | QR | CARD | WALLET | NETBANKING | CASH | MANUAL
+  1001→  method          String
+  1002→  // Status: PENDING | PROCESSING | PAID | FAILED | REFUNDED | COLLECTED_DIRECT
+  1003→  status          String   @default("PENDING")
+  1004→  // Provider references (for online payments)
+  1005→  provider        String?  // UPI | MOCK | RAZORPAY | PHONEPE | ...
+  1006→  providerTxnId   String?
+  1007→  providerRef     String?
+  1008→  idempotencyKey  String?  @unique
+  1009→  // Verification
+  1010→  verifiedAt      DateTime?
+  1011→  verifiedById    String?
+  1012→  failureReason   String?
+  1013→
+  1014→  // Links to a payment request (if the tenant is paying off a specific
+  1015→  // request from the super admin). Null if this is a self-initiated payment.
+  1016→  requestId       String?
+  1017→
+  1018→  // Notes
+  1019→  note            String?
+  1020→
+  1021→  // Metadata
+  1022→  rawResponse     String?
+  1023→
+  1024→  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  1025→  verifiedBy      User?       @relation("PlatformFeePaymentVerifiedBy", fields: [verifiedById], references: [id])
+  1026→  request         PlatformFeePaymentRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  1027→  coveredFees     PlatformFeeCoveredEntry[]
+  1028→
+  1029→  createdAt DateTime @default(now())
+  1030→  updatedAt DateTime @updatedAt
+  1031→
+  1032→  @@index([restaurantId])
+  1033→  @@index([status])
+  1034→  @@index([createdAt])
+  1035→}
+  1036→
+  1037→// M-to-N join between a PlatformFeePayment and the PlatformFee rows it
+  1038→// settles. Lets us reverse a payment cleanly (mark covered fees back to
+  1039→// PENDING on refund) and audit which exact fees a payment covered.
+  1040→model PlatformFeeCoveredEntry {
+  1041→  id              String   @id @default(cuid())
+  1042→  paymentId       String
+  1043→  platformFeeId   String
+  1044→
+  1045→  payment         PlatformFeePayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  1046→  platformFee     PlatformFee         @relation(fields: [platformFeeId], references: [id], onDelete: Cascade)
+  1047→
+  1048→  createdAt DateTime @default(now())
+  1049→
+  1050→  @@unique([paymentId, platformFeeId])
+  1051→  @@index([paymentId])
+  1052→  @@index([platformFeeId])
+  1053→}
+  1054→
+  1055→// A payment request the super admin sends to a tenant ("please pay ₹X by
+  1056→// date Y for your outstanding platform fees"). Tenants see this in their
+  1057→// Settings → Platform Fees tab with a "Pay now" action.
+  1058→model PlatformFeePaymentRequest {
+  1059→  id              String   @id @default(cuid())
+  1060→  restaurantId    String
+  1061→  // Amount in rupees
+  1062→  amount          Float
+  1063→  // Status: PENDING | PARTIALLY_PAID | PAID | EXPIRED | CANCELLED
+  1064→  status          String   @default("PENDING")
+  1065→  // Due date (when the admin expects payment; used to flag overdue)
+  1066→  dueDate         DateTime?
+  1067→  // Optional note from admin to tenant
+  1068→  note            String?
+  1069→  // When the request was sent
+  1070→  sentAt          DateTime @default(now())
+  1071→  // When the tenant paid it off (in full)
+  1072→  paidAt          DateTime?
+  1073→  // Amount paid so far (for partial payments)
+  1074→  amountPaid      Float    @default(0)
+  1075→
+  1076→  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  1077→  payments        PlatformFeePayment[]
+  1078→
+  1079→  createdAt DateTime @default(now())
+  1080→  updatedAt DateTime @updatedAt
+  1081→
+  1082→  @@index([restaurantId])
+  1083→  @@index([status])
+  1084→  @@index([createdAt])
+  1085→}
+  1086→
+  1087→// ============================================================================
+  1088→// PLATFORM PAYMENT METHODS — the platform's own payment config
+  1089→// ============================================================================
+  1090→// Super admin configures how tenants should pay the platform (e.g. the
+  1091→// platform's UPI ID, Razorpay key, etc.). Tenants see these as the
+  1092→// available payment options when paying their platform fees.
+  1093→//
+  1094→// This is separate from RestaurantPaymentMethod (which is each
+  1095→// restaurant's payment config for their customers).
+  1096→model PlatformPaymentMethod {
+  1097→  id              String   @id @default(cuid())
+  1098→  // Type: UPI | QR | CARD | WALLET | NETBANKING
+  1099→  type            String
+  1100→  label           String
+  1101→  description     String?
+  1102→  icon            String?
+  1103→  accentColor     String   @default("#EA580C")
+  1104→  priority        Int      @default(10)
+  1105→  active          Boolean  @default(true)
+  1106→  // Provider-specific config blob (e.g. { upiId: "platform@okhdfcbank" } or
+  1107→  // { provider: "RAZORPAY", keyId: "..." })
+  1108→  config          String?
+  1109→  createdAt       DateTime @default(now())
+  1110→  updatedAt       DateTime @updatedAt
+  1111→}
+  1112→
