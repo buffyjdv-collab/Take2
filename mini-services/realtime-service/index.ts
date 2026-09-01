@@ -64,6 +64,12 @@ io.on('connection', (socket) => {
     'payment:confirmed',
     'table:updated',
     'menu:updated',
+    // Platform fee lifecycle events
+    'platform:feeRequested',
+    'platform:feePaymentInit',
+    'platform:feePaid',
+    'platform:feeCollected',
+    'platform:feeOverdue',
   ].forEach((evt) => {
     socket.on(evt, (data: RealtimeEnvelope) => forward(evt, data))
   })

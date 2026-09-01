@@ -7,6 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -45,9 +53,12 @@ import {
   Ban,
   CheckCircle2,
   ShieldAlert,
+  Send,
+  Wallet,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatINR, formatRelative } from '@/lib/format'
+import { useSocketEvent } from '@/hooks/use-socket'
 
 const PIE_COLORS = ['#EA580C', '#16A34A', '#9333EA', '#0EA5E9', '#F59E0B']
 const RANGES = [
@@ -286,6 +297,127 @@ export function PlatformFeesCollected() {
     onError: (err: Error) => toast.error(err.message || 'Failed to unblock QR'),
   })
 
+  // ----- Platform fee payment request mutation -----
+  // Sends a "please pay ₹X by date Y" request to a tenant. Fires a
+  // `platform:feeRequested` realtime event the tenant sees in their
+  // Settings → Platform fees tab.
+  const [requestTarget, setRequestTarget] = useState<TenantRow | null>(null)
+  const [requestAmount, setRequestAmount] = useState('')
+  const [requestNote, setRequestNote] = useState('')
+  const [requestDueDate, setRequestDueDate] = useState('')
+
+  const requestMutation = useMutation({
+    mutationFn: async ({
+      restaurantId,
+      amount,
+      dueDate,
+      note,
+    }: {
+      restaurantId: string
+      amount: number
+      dueDate?: string
+      note?: string
+    }) => {
+      const res = await fetch('/api/platform/fees/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurantId,
+          amount,
+          dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+          note: note || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || 'Failed to send payment request')
+      }
+      return res.json()
+    },
+    onSuccess: (_data, vars) => {
+      toast.success('Payment request sent', {
+        description: `${formatINR(vars.amount)} requested from ${
+          requestTarget?.restaurantName || 'tenant'
+        }`,
+      })
+      setRequestTarget(null)
+      setRequestAmount('')
+      setRequestNote('')
+      setRequestDueDate('')
+      qc.invalidateQueries({ queryKey: ['platform-fees'] })
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to send request'),
+  })
+
+  // ----- Manual collect mutation -----
+  // Super admin marks a tenant's pending fees as COLLECTED_DIRECT (for
+  // offline cash / bank transfer settlements). Fires `platform:feePaid`
+  // + `platform:feeCollected` realtime events.
+  const [collectTarget, setCollectTarget] = useState<TenantRow | null>(null)
+
+  const collectMutation = useMutation({
+    mutationFn: async ({
+      restaurantId,
+      amount,
+      note,
+    }: {
+      restaurantId: string
+      amount?: number
+      note?: string
+    }) => {
+      const res = await fetch('/api/platform/fees/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurantId,
+          amount: amount || undefined,
+          note: note || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || 'Failed to collect fees')
+      }
+      return res.json()
+    },
+    onSuccess: (json) => {
+      const d = json.data
+      toast.success('Fees collected', {
+        description: `${formatINR(d.amount)} collected from ${collectTarget?.restaurantName || 'tenant'} · ${d.feesCovered} fees`,
+      })
+      setCollectTarget(null)
+      qc.invalidateQueries({ queryKey: ['platform-fees'] })
+      qc.invalidateQueries({ queryKey: ['platform-tenants'] })
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to collect'),
+  })
+
+  // ----- Realtime subscriptions -----
+  // When a tenant pays their platform fees, the `platform:feePaid` event
+  // fires. We refetch the platform fees summary so the by-tenant table and
+  // KPIs update live (no manual refresh).
+  useSocketEvent<{ paymentId: string; amount: number; restaurantName: string }>(
+    'platform:feePaid',
+    (payload) => {
+      toast.success('Platform fee payment received', {
+        description: `${formatINR(payload.amount)} from ${payload.restaurantName}`,
+      })
+      qc.invalidateQueries({ queryKey: ['platform-fees'] })
+    },
+  )
+
+  // When a tenant initiates a payment (clicks "Pay now"), show a toast and
+  // refetch so the super admin sees the in-progress payment.
+  useSocketEvent<{ amount: number; restaurantName: string }>(
+    'platform:feePaymentInit',
+    (payload) => {
+      toast.info('Tenant started a payment', {
+        description: `${payload.restaurantName} initiated ${formatINR(payload.amount)}`,
+      })
+      qc.invalidateQueries({ queryKey: ['platform-fees'] })
+    },
+  )
+
   // ----- Sorting + totals for the by-tenant table -----
   const sortedTenants = useMemo<TenantRow[]>(() => {
     if (!data) return []
@@ -499,6 +631,131 @@ export function PlatformFeesCollected() {
         }}
       />
 
+      {/* Request payment dialog (super admin → tenant) */}
+      <Dialog open={!!requestTarget} onOpenChange={(o) => !o && setRequestTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-4 w-4 text-orange-600" />
+              Request platform fee payment
+            </DialogTitle>
+            <DialogDescription>
+              Send a payment request to{' '}
+              <strong>{requestTarget?.restaurantName}</strong>. They will see it in
+              their Settings → Platform fees tab with a "Pay now" action.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Amount (₹)
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={requestAmount}
+                onChange={(e) => setRequestAmount(e.target.value)}
+                className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                placeholder="0.00"
+              />
+              {requestTarget && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Current pending: {formatINR(requestTarget.pending)}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Due date (optional)
+              </label>
+              <input
+                type="date"
+                value={requestDueDate}
+                onChange={(e) => setRequestDueDate(e.target.value)}
+                className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Note (optional)
+              </label>
+              <textarea
+                value={requestNote}
+                onChange={(e) => setRequestNote(e.target.value)}
+                rows={2}
+                className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                placeholder="Please settle your outstanding platform fees"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequestTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!requestTarget) return
+                const amt = parseFloat(requestAmount)
+                if (!amt || amt <= 0) {
+                  toast.error('Enter a valid amount')
+                  return
+                }
+                requestMutation.mutate({
+                  restaurantId: requestTarget.restaurantId,
+                  amount: amt,
+                  dueDate: requestDueDate || undefined,
+                  note: requestNote || undefined,
+                })
+              }}
+              disabled={requestMutation.isPending}
+            >
+              {requestMutation.isPending ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-1 h-4 w-4" />
+              )}
+              Send request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual collect confirmation dialog (offline settlements) */}
+      <ConfirmDialog
+        open={!!collectTarget}
+        onOpenChange={(v) => !v && setCollectTarget(null)}
+        title={collectTarget ? `Collect fees from ${collectTarget.restaurantName}?` : ''}
+        description={
+          collectTarget ? (
+            <div className="space-y-2 text-sm">
+              <p>
+                This will mark <strong>{formatINR(collectTarget.pending)}</strong> of
+                pending fees as <span className="font-semibold text-emerald-700">COLLECTED</span>.
+                The tenant's outstanding balance will drop to zero.
+              </p>
+              <div className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                <CheckCircle2 className="mr-1 inline h-3 w-3" />
+                Use this for offline settlements (cash, bank transfer, etc.) where
+                there's no in-app payment to verify. A PlatformFeePayment row with
+                status <code className="font-mono">COLLECTED_DIRECT</code> will be
+                created for audit.
+              </div>
+            </div>
+          ) : undefined
+        }
+        confirmLabel="Mark collected"
+        variant="default"
+        onConfirm={() => {
+          if (!collectTarget) return
+          collectMutation.mutate({
+            restaurantId: collectTarget.restaurantId,
+            amount: collectTarget.pending || undefined,
+            note: 'Manual collection by super admin',
+          })
+        }}
+      />
+
       {/* Charts */}
       <div className="grid gap-4 grid-cols-1">
         <Card>
@@ -566,13 +823,14 @@ export function PlatformFeesCollected() {
                   <SortableTh column="refunded" sort={sort} onSort={toggleSort} label="Refunded" align="right" />
                   <SortableTh column="restaurantPaid" sort={sort} onSort={toggleSort} label="Restaurant paid" align="right" />
                   <SortableTh column="customerPaid" sort={sort} onSort={toggleSort} label="Customer paid" align="right" />
+                  <th className="px-4 py-2 text-xs font-semibold uppercase text-muted-foreground">Actions</th>
                 </tr>
               </thead>
 
               {sortedTenants.length === 0 ? (
                 <tbody>
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
                       No fees collected in this range
                     </td>
                   </tr>
@@ -611,6 +869,39 @@ export function PlatformFeesCollected() {
                             <td className="px-4 py-2 text-right text-purple-700">{t.refunded > 0 ? formatINR(t.refunded) : '—'}</td>
                             <td className="px-4 py-2 text-right">{formatINR(t.restaurantPaid)}</td>
                             <td className="px-4 py-2 text-right">{formatINR(t.customerPaid)}</td>
+                            <td className="px-4 py-2">
+                              {t.pending > 0 ? (
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setRequestTarget(t)
+                                      setRequestAmount(String(t.pending.toFixed(2)))
+                                    }}
+                                  >
+                                    <Send className="mr-1 h-3 w-3" />
+                                    Request
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setCollectTarget(t)
+                                    }}
+                                  >
+                                    <Wallet className="mr-1 h-3 w-3" />
+                                    Collect
+                                  </Button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </td>
                           </tr>
                         </CollapsibleTrigger>
 
@@ -630,6 +921,7 @@ export function PlatformFeesCollected() {
                               <td className="px-4 py-2 text-right text-xs text-purple-700">{p.refunded > 0 ? formatINR(p.refunded) : '—'}</td>
                               <td className="px-4 py-2 text-right text-xs">{formatINR(p.restaurantPaid)}</td>
                               <td className="px-4 py-2 text-right text-xs">{formatINR(p.customerPaid)}</td>
+                              <td className="px-4 py-2" />
                             </tr>
                           </CollapsibleContent>
                         ))}
@@ -653,6 +945,7 @@ export function PlatformFeesCollected() {
                     <td className="px-4 py-2 text-right text-purple-700">{totals.refunded > 0 ? formatINR(totals.refunded) : '—'}</td>
                     <td className="px-4 py-2 text-right">{formatINR(totals.restaurantPaid)}</td>
                     <td className="px-4 py-2 text-right">{formatINR(totals.customerPaid)}</td>
+                    <td className="px-4 py-2" />
                   </tr>
                 </tfoot>
               )}

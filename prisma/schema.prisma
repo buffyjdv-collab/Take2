@@ -47,6 +47,7 @@ model User {
   invitationsSent TenantInvitation[] @relation("InvitationsSent")
   invitationsAccepted TenantInvitation[] @relation("InvitationsAccepted")
   onboardedRestaurants Restaurant[] @relation("OnboardedBy")
+  verifiedPlatformFeePayments PlatformFeePayment[] @relation("PlatformFeePaymentVerifiedBy")
   platformFeeConfigUpdates PlatformFeeConfig[] @relation("PlatformFeeConfigUpdatedBy")
   rbacPermissions RolePermission[]
   rbacModuleAccess RoleModuleAccess[]
@@ -221,6 +222,8 @@ model Restaurant {
   onboardedBy     User?       @relation("OnboardedBy", fields: [onboardedById], references: [id])
   platformFees    PlatformFee[]
   paymentMethods  RestaurantPaymentMethod[]
+  feePayments     PlatformFeePayment[]
+  feePaymentRequests PlatformFeePaymentRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -952,6 +955,7 @@ model PlatformFee {
 
   order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  coveredByPayments PlatformFeeCoveredEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -959,4 +963,149 @@ model PlatformFee {
   @@index([restaurantId])
   @@index([status])
   @@index([createdAt])
+}
+
+// ============================================================================
+// PLATFORM FEE PAYMENTS — end-to-end platform fee collection system
+// ============================================================================
+// When a restaurant pays its accumulated platform fees to the platform
+// operator (super admin), a PlatformFeePayment row records the lump-sum
+// payment. The payment covers a set of underlying PlatformFee rows (the
+// per-order PENDING fees that the restaurant is settling).
+//
+// Lifecycle:
+//   1. Super admin sends a PlatformFeePaymentRequest to a tenant with the
+//      requested amount, due date, and note. Status = PENDING.
+//   2. The tenant sees the request in their Settings → Platform Fees tab
+//      and taps "Pay now" — they choose a payment method (UPI / Card /
+//      Wallet / Net banking) and submit. A PlatformFeePayment row is
+//      created with status = PROCESSING.
+//   3. The platform verifies the payment (mock for UPI/CARD/etc.; real
+//      gateway integration point) and the PlatformFeePayment transitions
+//      to PAID. The covered PlatformFee rows are marked COLLECTED in bulk.
+//   4. Realtime events fire at each step:
+//        platform:feeRequested   → step 1 (admin → tenant)
+//        platform:feePaymentInit → step 2 (tenant → admin)
+//        platform:feePaid        → step 3 (system → both parties)
+//        platform:feeCollected  → step 3 (system → both parties, per fee)
+//
+// Super admin can also do a "manual collect" (mark fees as collected
+// without a payment) for offline settlements — status = COLLECTED_DIRECT.
+
+model PlatformFeePayment {
+  id              String   @id @default(cuid())
+  restaurantId    String
+  // Amount in rupees (lump sum)
+  amount          Float
+  // Method: UPI | QR | CARD | WALLET | NETBANKING | CASH | MANUAL
+  method          String
+  // Status: PENDING | PROCESSING | PAID | FAILED | REFUNDED | COLLECTED_DIRECT
+  status          String   @default("PENDING")
+  // Provider references (for online payments)
+  provider        String?  // UPI | MOCK | RAZORPAY | PHONEPE | ...
+  providerTxnId   String?
+  providerRef     String?
+  idempotencyKey  String?  @unique
+  // Verification
+  verifiedAt      DateTime?
+  verifiedById    String?
+  failureReason   String?
+
+  // Links to a payment request (if the tenant is paying off a specific
+  // request from the super admin). Null if this is a self-initiated payment.
+  requestId       String?
+
+  // Notes
+  note            String?
+
+  // Metadata
+  rawResponse     String?
+
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  verifiedBy      User?       @relation("PlatformFeePaymentVerifiedBy", fields: [verifiedById], references: [id])
+  request         PlatformFeePaymentRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  coveredFees     PlatformFeeCoveredEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([restaurantId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// M-to-N join between a PlatformFeePayment and the PlatformFee rows it
+// settles. Lets us reverse a payment cleanly (mark covered fees back to
+// PENDING on refund) and audit which exact fees a payment covered.
+model PlatformFeeCoveredEntry {
+  id              String   @id @default(cuid())
+  paymentId       String
+  platformFeeId   String
+
+  payment         PlatformFeePayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  platformFee     PlatformFee         @relation(fields: [platformFeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, platformFeeId])
+  @@index([paymentId])
+  @@index([platformFeeId])
+}
+
+// A payment request the super admin sends to a tenant ("please pay ₹X by
+// date Y for your outstanding platform fees"). Tenants see this in their
+// Settings → Platform Fees tab with a "Pay now" action.
+model PlatformFeePaymentRequest {
+  id              String   @id @default(cuid())
+  restaurantId    String
+  // Amount in rupees
+  amount          Float
+  // Status: PENDING | PARTIALLY_PAID | PAID | EXPIRED | CANCELLED
+  status          String   @default("PENDING")
+  // Due date (when the admin expects payment; used to flag overdue)
+  dueDate         DateTime?
+  // Optional note from admin to tenant
+  note            String?
+  // When the request was sent
+  sentAt          DateTime @default(now())
+  // When the tenant paid it off (in full)
+  paidAt          DateTime?
+  // Amount paid so far (for partial payments)
+  amountPaid      Float    @default(0)
+
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  payments        PlatformFeePayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([restaurantId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PLATFORM PAYMENT METHODS — the platform's own payment config
+// ============================================================================
+// Super admin configures how tenants should pay the platform (e.g. the
+// platform's UPI ID, Razorpay key, etc.). Tenants see these as the
+// available payment options when paying their platform fees.
+//
+// This is separate from RestaurantPaymentMethod (which is each
+// restaurant's payment config for their customers).
+model PlatformPaymentMethod {
+  id              String   @id @default(cuid())
+  // Type: UPI | QR | CARD | WALLET | NETBANKING
+  type            String
+  label           String
+  description     String?
+  icon            String?
+  accentColor     String   @default("#EA580C")
+  priority        Int      @default(10)
+  active          Boolean  @default(true)
+  // Provider-specific config blob (e.g. { upiId: "platform@okhdfcbank" } or
+  // { provider: "RAZORPAY", keyId: "..." })
+  config          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

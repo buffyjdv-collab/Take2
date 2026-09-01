@@ -13,6 +13,7 @@ import { LoadingSpinner, ButtonWithLoading, EmptyState } from '@/components/rest
 import { toast } from 'sonner'
 import { useSession } from 'next-auth/react'
 import { PaymentMethodsManager } from './payment-methods-manager'
+import { PlatformFeesPanel } from './platform-fees-panel'
 
 export function SettingsManager() {
   const { data: session } = useSession()
@@ -126,6 +127,7 @@ export function SettingsManager() {
           <TabsTrigger value="tax">Tax & billing</TabsTrigger>
           <TabsTrigger value="hours">Hours</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="platform-fees">Platform fees</TabsTrigger>
           <TabsTrigger value="theme">Theme</TabsTrigger>
           <TabsTrigger value="receipt">Receipt</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
@@ -199,6 +201,22 @@ export function SettingsManager() {
         <TabsContent value="payments">
           {/* Zepto-style Payment Methods Manager */}
           <PaymentMethodsManager restaurantId={effectiveId || undefined} />
+        </TabsContent>
+
+        <TabsContent value="platform-fees">
+          {role === 'SUPER_ADMIN' ? (
+            <Card>
+              <CardHeader><CardTitle className="text-base">Platform fees</CardTitle></CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Super admins manage platform fees from the Platform → Fees
+                  page. Switch to a tenant to see their fee summary here.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <PlatformFeesPanel />
+          )}
         </TabsContent>
 
         <TabsContent value="theme">

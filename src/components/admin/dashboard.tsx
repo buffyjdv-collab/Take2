@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
+import { PlatformFeeAlertBanner } from './platform-fee-alert-banner'
 
 export function Dashboard() {
   const { data, isLoading, error } = useAdminDashboard()
@@ -83,6 +84,7 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4 p-4 lg:p-6">
+      <PlatformFeeAlertBanner />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
