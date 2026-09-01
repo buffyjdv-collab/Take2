@@ -9,6 +9,7 @@ import { MenuList } from './menu-list'
 import { ItemDetailSheet } from './item-detail-sheet'
 import { CartDrawer } from './cart-drawer'
 import { OrderTracking } from './order-tracking'
+import { OrderTrackingList } from './order-tracking-list'
 import { BillView } from './bill-view'
 import { FloatingCartButton } from './floating-cart-button'
 import { CustomerBottomNav } from './customer-bottom-nav'
@@ -31,6 +32,9 @@ export function CustomerApp({ token }: { token: string }) {
   // on a previously accepted order. The next checkout pre-fills these so the
   // follow-up order is placed as a fresh new order with the same details.
   const [prefillCustomer, setPrefillCustomer] = useState<{ name: string; phone: string } | null>(null)
+  // Customer mobile — stored after the first order is placed so the tracking
+  // view can fetch ALL active orders for that phone number (multi-order list).
+  const [customerPhone, setCustomerPhone] = useState<string | null>(null)
 
   useEffect(() => {
     const saved = sessionStorage.getItem(`order-${token}`)
@@ -52,6 +56,11 @@ export function CustomerApp({ token }: { token: string }) {
         sessionStorage.removeItem(`prefill-customer-${token}`)
       }
     }
+
+    // Restore the stored customer phone (survives a reload) so the multi-order
+    // tracking list can fetch all active orders for that mobile.
+    const savedPhone = sessionStorage.getItem(`customer-phone-${token}`)
+    if (savedPhone) setCustomerPhone(savedPhone)
   }, [token])
 
   const { data, isLoading, error } = useCustomerMenu(token)
@@ -183,13 +192,44 @@ export function CustomerApp({ token }: { token: string }) {
         </>
       )}
 
-      {view === 'track' && !placedOrderId && (
+      {view === 'track' && !placedOrderId && !customerPhone && (
         <div className="flex flex-1 items-center justify-center p-8 text-center">
           <p className="text-sm text-slate-400">No active order to track.</p>
         </div>
       )}
 
-      {view === 'track' && placedOrderId && (
+      {/* Multi-order tracking list — shows ALL active orders for the customer's
+          phone number as collapsible cards (each with its own tracking + bill). */}
+      {view === 'track' && customerPhone && (
+        <OrderTrackingList
+          phone={customerPhone}
+          tableToken={token}
+          restaurant={restaurant}
+          onBackToMenu={() => {
+            setView('menu')
+            window.location.hash = ''
+          }}
+          onOrderMore={(name, phone) => {
+            // Start a FRESH new order: clear the cart + reuse name & mobile.
+            clearCart()
+            const prefill = { name: name || '', phone: phone || '' }
+            setPrefillCustomer(prefill)
+            sessionStorage.setItem(`prefill-customer-${token}`, JSON.stringify(prefill))
+            if (phone) {
+              setCustomerPhone(phone)
+              sessionStorage.setItem(`customer-phone-${token}`, phone)
+            }
+            setView('menu')
+            window.location.hash = ''
+            toast.info('Start a new order — your details are saved.', {
+              description: 'Add items, then checkout. It will go through as a new order.',
+            })
+          }}
+        />
+      )}
+
+      {/* Fallback: single-order tracking when no phone is stored yet. */}
+      {view === 'track' && !customerPhone && placedOrderId && (
         <OrderTracking
           orderId={placedOrderId}
           restaurant={restaurant}
@@ -202,13 +242,14 @@ export function CustomerApp({ token }: { token: string }) {
             window.location.hash = 'bill'
           }}
           onOrderMore={(name, phone) => {
-            // Start a FRESH new order: clear the cart so the customer builds a
-            // new one, but re-use the customer's name & mobile from the
-            // accepted order (pre-filled in the checkout details step).
             clearCart()
             const prefill = { name: name || '', phone: phone || '' }
             setPrefillCustomer(prefill)
             sessionStorage.setItem(`prefill-customer-${token}`, JSON.stringify(prefill))
+            if (phone) {
+              setCustomerPhone(phone)
+              sessionStorage.setItem(`customer-phone-${token}`, phone)
+            }
             setView('menu')
             window.location.hash = ''
             toast.info('Start a new order — your details are saved.', {
@@ -244,10 +285,16 @@ export function CustomerApp({ token }: { token: string }) {
         restaurant={restaurant}
         initialCustomerName={prefillCustomer?.name}
         initialCustomerPhone={prefillCustomer?.phone}
-        onCheckout={(orderId) => {
+        onCheckout={(orderId, phone) => {
           setPlacedOrderId(orderId)
           setJustPlaced(true)
           sessionStorage.setItem(`order-${token}`, orderId)
+          // Store the customer phone so the multi-order tracking list can
+          // fetch ALL active orders for that mobile number.
+          if (phone) {
+            setCustomerPhone(phone)
+            sessionStorage.setItem(`customer-phone-${token}`, phone)
+          }
           // The new order is placed — clear the pre-fill so it isn't reused
           // for an unrelated future order.
           setPrefillCustomer(null)

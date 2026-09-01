@@ -24,7 +24,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   restaurant: RestaurantInfo
-  onCheckout: (orderId: string) => void
+  onCheckout: (orderId: string, customerPhone?: string) => void
   /** Pre-fill customer name/phone on the checkout details step (used when the
    *  customer is placing a fresh follow-up order after a previous accepted
    *  order — same name & mobile). */
@@ -43,10 +43,10 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout, initial
 
   const t = totals(restaurant.taxRate, restaurant.serviceChargeRate)
 
-  const handleCheckoutComplete = (orderId: string) => {
+  const handleCheckoutComplete = (orderId: string, customerPhone?: string) => {
     setCheckoutOpen(false)
     clear()
-    onCheckout(orderId)
+    onCheckout(orderId, customerPhone)
   }
 
   return (

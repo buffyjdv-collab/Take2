@@ -73,8 +73,11 @@ interface Props {
   restaurant: RestaurantInfo
   totals: Totals
   items: CartItem[]
-  /** Called when an order has been placed + payment (if any) is done. */
-  onCheckoutComplete: (orderId: string) => void
+  /** Called when an order has been placed + payment (if any) is done. The
+   *  customerPhone is passed up so the parent (customer-app) can store it and
+   *  use it to fetch ALL active orders for that mobile number (multi-order
+   *  tracking list). */
+  onCheckoutComplete: (orderId: string, customerPhone?: string) => void
   /** Optional: if provided, the sheet operates in "pay existing order" mode
    *  (used by bill-view + order-tracking). When undefined, the sheet first
    *  creates a new order via /api/customer/order. */
@@ -344,20 +347,21 @@ export function CheckoutSheet({
     }
   }
 
-  // Auto-redirect to order tracking after success
+  // Auto-redirect to order tracking after success. Pass the customerPhone
+  // up to the parent so it can fetch ALL active orders for that mobile.
   useEffect(() => {
     if (step === 'success' && placedOrderId) {
       const t = setTimeout(() => {
-        onCheckoutComplete(placedOrderId)
+        onCheckoutComplete(placedOrderId, customerPhone || undefined)
       }, 1800)
       return () => clearTimeout(t)
     }
-  }, [step, placedOrderId, onCheckoutComplete])
+  }, [step, placedOrderId, onCheckoutComplete, customerPhone])
 
   // Manual redirect from the error step → route to tracking page
   const goToTracking = () => {
     if (placedOrderId) {
-      onCheckoutComplete(placedOrderId)
+      onCheckoutComplete(placedOrderId, customerPhone || undefined)
     }
   }
 

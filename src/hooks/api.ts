@@ -102,6 +102,23 @@ export function useCancelOrder() {
   })
 }
 
+// Fetch ALL active (non-completed, non-cancelled) orders for a given customer
+// phone number at the table's restaurant. Used by the multi-order tracking
+// list so the customer can see every active order they've placed (e.g. after
+// placing a follow-up "order more items" order while a previous one is still
+// in progress).
+export function useCustomerActiveOrders(phone: string | null, tableToken: string | null) {
+  return useQuery({
+    queryKey: ['customer-active-orders', phone, tableToken],
+    queryFn: () =>
+      api<{ orders: any[]; restaurantId: string }>(
+        `/api/customer/orders/active?phone=${encodeURIComponent(phone!)}&table=${tableToken}`,
+      ),
+    enabled: !!phone && !!tableToken,
+    refetchInterval: 15_000,
+  })
+}
+
 export function useCreateServiceRequest() {
   return useMutation({
     mutationFn: (body: any) =>

@@ -628,3 +628,21 @@ Stage Summary:
 - Neon Postgres database is seeded and the dev server runs against it (port 3000, realtime on 3003).
 - Only 4 source files were committed (134 insertions, 4 deletions); no .env, no DB binaries, no verification artifacts included.
 - PAT was used only for the push and then scrubbed from git config.
+
+---
+Task ID: 3
+Agent: main (z.ai code)
+Task: Show tracking + bill of ALL active orders for a mobile number as collapsible/expandable order-wise cards when a new order is placed while an old one is active.
+
+Work Log:
+- Created GET /api/customer/orders/active?phone=&table= API: resolves table token → restaurant, fetches all orders for that phone (digits-normalized match for robustness), filters to active statuses (NEW/PENDING_PAYMENT/ACCEPTED/PREPARING/READY/SERVED), returns newest-first with items+modifiers+table+payments.
+- Added useCustomerActiveOrders(phone, tableToken) hook in src/hooks/api.ts (TanStack Query, 15s refetch, socket-aware).
+- Created src/components/customer/order-tracking-list.tsx: renders all active orders as independently collapsible cards. Each expanded card shows: compact horizontal status stepper, payment-due banner (if applicable), order items, collapsible bill details (subtotal/tax/service/grand-total), and per-order actions (Pay, Order more items, Cancel). Most-recent order expanded by default; "Expand all"/"Collapse" controls when >1 order. Socket subscriptions (order:updated, order:statusChanged, payment:confirmed, payment:requested, order:new) auto-refresh the list.
+- Threaded customerPhone through checkout callbacks: CheckoutSheet.onCheckoutComplete now passes (orderId, customerPhone); CartDrawer.onCheckout passes it through; customer-app stores customerPhone in sessionStorage + state.
+- Wired OrderTrackingList into customer-app track view: when customerPhone is available, renders the multi-order list; falls back to single OrderTracking when no phone stored yet. onOrderMore stores the phone so the list persists across the re-order flow.
+- Agent Browser verified on Neon: placed order #1 (Crispy Corn, SPGA-000001, ACCEPTED) → tapped "Order more items" → placed order #2 (Dal Makhani, SPGA-000002, ACCEPTED, same phone 9876543210) → tracking page shows "2 orders · ••••3210" with BOTH order cards (latest expanded, older collapsed). Expand/collapse, Expand all, and per-order bill-details toggle all confirmed working. 0 page errors. Lint clean.
+
+Stage Summary:
+- Feature complete and browser-verified. When a customer places a new order while an old one is active (same mobile), the tracking page shows ALL active orders for that number as independently collapsible/expandable cards — each with its own tracking stepper, items, bill details, and actions.
+- New files: src/app/api/customer/orders/active/route.ts, src/components/customer/order-tracking-list.tsx
+- Modified: src/hooks/api.ts, src/components/customer/{checkout-sheet,cart-drawer,customer-app}.tsx
