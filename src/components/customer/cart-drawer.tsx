@@ -25,9 +25,14 @@ interface Props {
   onOpenChange: (open: boolean) => void
   restaurant: RestaurantInfo
   onCheckout: (orderId: string) => void
+  /** Pre-fill customer name/phone on the checkout details step (used when the
+   *  customer is placing a fresh follow-up order after a previous accepted
+   *  order — same name & mobile). */
+  initialCustomerName?: string
+  initialCustomerPhone?: string
 }
 
-export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props) {
+export function CartDrawer({ open, onOpenChange, restaurant, onCheckout, initialCustomerName, initialCustomerPhone }: Props) {
   const items = useCustomerCart((s) => s.items)
   const updateQuantity = useCustomerCart((s) => s.updateQuantity)
   const removeItem = useCustomerCart((s) => s.removeItem)
@@ -205,6 +210,8 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout }: Props
         }}
         items={items as CartItem[]}
         onCheckoutComplete={handleCheckoutComplete}
+        initialCustomerName={initialCustomerName}
+        initialCustomerPhone={initialCustomerPhone}
       />
     </>
   )

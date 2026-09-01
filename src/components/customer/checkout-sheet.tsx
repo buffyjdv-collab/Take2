@@ -87,6 +87,12 @@ interface Props {
    *  chose at order placement, so they're not asked to pick it again
    *  post-serve. */
   hiddenMethodIds?: string[]
+  /** Optional: pre-fill the customer-details step with a name. Used when the
+   *  customer places a fresh follow-up order after a previous accepted order
+   *  — they keep the same customer name & mobile, so we pre-fill the form. */
+  initialCustomerName?: string
+  /** Optional: pre-fill the customer-details step with a phone number. */
+  initialCustomerPhone?: string
 }
 
 type Step = 'details' | 'method' | 'upi_launch' | 'qr' | 'processing' | 'success' | 'error'
@@ -113,14 +119,16 @@ export function CheckoutSheet({
   existingOrderId,
   skipCustomerDetails,
   hiddenMethodIds = [],
+  initialCustomerName = '',
+  initialCustomerPhone = '',
 }: Props) {
   const placeOrder = usePlaceOrder()
   const initiate = useInitiatePayment()
   const verify = useVerifyPayment()
 
   const [step, setStep] = useState<Step>(skipCustomerDetails ? 'method' : 'details')
-  const [customerName, setCustomerName] = useState('')
-  const [customerPhone, setCustomerPhone] = useState('')
+  const [customerName, setCustomerName] = useState(initialCustomerName)
+  const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone)
   const [touched, setTouched] = useState(false)
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodT | null>(null)
   const [placedOrderId, setPlacedOrderId] = useState<string | null>(existingOrderId || null)
@@ -142,11 +150,38 @@ export function CheckoutSheet({
           setUpiId(null)
           setTouched(false)
           setSuccessMessage('')
+          // CRITICAL for the "Order more items" flow: clear the placed-order
+          // id so the NEXT open starts a FRESH new order. Without this, the
+          // same mounted sheet would re-use order #1's id for order #2 and
+          // `ensureOrderPlaced()` would short-circuit without creating a new
+          // order. In existing-order mode (post-serve payment) we keep the
+          // existing id.
+          setPlacedOrderId(existingOrderId || null)
+          // Restore the pre-filled customer details when the sheet re-opens —
+          // this matters for the "order more items" follow-up flow where the
+          // customer keeps the same name & mobile across orders.
+          setCustomerName(initialCustomerName)
+          setCustomerPhone(initialCustomerPhone)
         }
       }, 300)
       return () => clearTimeout(t)
     }
-  }, [open, step, skipCustomerDetails])
+  }, [open, step, skipCustomerDetails, initialCustomerName, initialCustomerPhone, existingOrderId])
+
+  // Sync pre-filled customer details whenever the sheet opens with new
+  // initial values. The CheckoutSheet stays mounted (only `open` toggles), so
+  // useState initialisers don't re-run — this effect applies fresh prefill
+  // values supplied by the parent (e.g. right after the customer taps
+  // "Order more items" on the tracking page). It also guarantees that, in
+  // new-order mode, any previously placed order id is cleared so a genuinely
+  // NEW order is created (defence-in-depth alongside the close-reset above).
+  useEffect(() => {
+    if (open) {
+      setCustomerName((prev) => initialCustomerName || prev)
+      setCustomerPhone((prev) => initialCustomerPhone || prev)
+      if (!existingOrderId) setPlacedOrderId(null)
+    }
+  }, [open, initialCustomerName, initialCustomerPhone, existingOrderId])
 
   const availableMethods = useMemo(
     () => filterAvailableForCheckout(restaurant.paymentMethods),
@@ -412,6 +447,16 @@ export function CheckoutSheet({
                     <span className="text-lg font-extrabold text-slate-900">{totalDisplay}</span>
                   </div>
                 </div>
+
+                {initialCustomerName && (
+                  <div className="flex items-center gap-2 rounded-xl bg-orange-50 p-2.5 text-[11.5px] text-orange-700">
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                    <span>
+                      Re-using your name &amp; mobile from your previous order —
+                      tap Continue to place this as a fresh new order.
+                    </span>
+                  </div>
+                )}
 
                 <div className="space-y-3">
                   <div className="space-y-1.5">

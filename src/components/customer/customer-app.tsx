@@ -27,6 +27,10 @@ export function CustomerApp({ token }: { token: string }) {
   const [cartOpen, setCartOpen] = useState(false)
   const [placedOrderId, setPlacedOrderId] = useState<string | null>(null)
   const [justPlaced, setJustPlaced] = useState(false)
+  // Customer name & mobile captured when the customer taps "Order more items"
+  // on a previously accepted order. The next checkout pre-fills these so the
+  // follow-up order is placed as a fresh new order with the same details.
+  const [prefillCustomer, setPrefillCustomer] = useState<{ name: string; phone: string } | null>(null)
 
   useEffect(() => {
     const saved = sessionStorage.getItem(`order-${token}`)
@@ -37,10 +41,22 @@ export function CustomerApp({ token }: { token: string }) {
       sessionStorage.removeItem('returning-from-upi')
       window.location.hash = 'track'
     }
+
+    // Restore any pre-fill customer details captured when the customer tapped
+    // "Order more items" on a previously accepted order (survives a reload).
+    const prefill = sessionStorage.getItem(`prefill-customer-${token}`)
+    if (prefill) {
+      try {
+        setPrefillCustomer(JSON.parse(prefill))
+      } catch {
+        sessionStorage.removeItem(`prefill-customer-${token}`)
+      }
+    }
   }, [token])
 
   const { data, isLoading, error } = useCustomerMenu(token)
   const setScope = useCustomerCart((s) => s.setScope)
+  const clearCart = useCustomerCart((s) => s.clear)
 
   useEffect(() => {
     if (data?.restaurant.id && data?.table.id) {
@@ -185,6 +201,20 @@ export function CustomerApp({ token }: { token: string }) {
             setView('bill')
             window.location.hash = 'bill'
           }}
+          onOrderMore={(name, phone) => {
+            // Start a FRESH new order: clear the cart so the customer builds a
+            // new one, but re-use the customer's name & mobile from the
+            // accepted order (pre-filled in the checkout details step).
+            clearCart()
+            const prefill = { name: name || '', phone: phone || '' }
+            setPrefillCustomer(prefill)
+            sessionStorage.setItem(`prefill-customer-${token}`, JSON.stringify(prefill))
+            setView('menu')
+            window.location.hash = ''
+            toast.info('Start a new order — your details are saved.', {
+              description: 'Add items, then checkout. It will go through as a new order.',
+            })
+          }}
         />
       )}
 
@@ -212,10 +242,16 @@ export function CustomerApp({ token }: { token: string }) {
         open={cartOpen}
         onOpenChange={setCartOpen}
         restaurant={restaurant}
+        initialCustomerName={prefillCustomer?.name}
+        initialCustomerPhone={prefillCustomer?.phone}
         onCheckout={(orderId) => {
           setPlacedOrderId(orderId)
           setJustPlaced(true)
           sessionStorage.setItem(`order-${token}`, orderId)
+          // The new order is placed — clear the pre-fill so it isn't reused
+          // for an unrelated future order.
+          setPrefillCustomer(null)
+          sessionStorage.removeItem(`prefill-customer-${token}`)
           setCartOpen(false)
           toast.success('Order placed! Track its status below.')
         }}

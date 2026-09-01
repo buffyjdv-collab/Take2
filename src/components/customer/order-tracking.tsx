@@ -41,6 +41,7 @@ import {
   ChevronDown,
   Receipt,
   Sparkles,
+  PlusCircle,
   type LucideIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -87,11 +88,16 @@ export function OrderTracking({
   restaurant,
   onBackToMenu,
   onProceedToBill,
+  onOrderMore,
 }: {
   orderId: string
   restaurant?: RestaurantInfo
   onBackToMenu: () => void
   onProceedToBill: () => void
+  /** Called when the customer wants to place a fresh follow-up order after
+   *  the current one has been accepted. Receives the customer name & phone
+   *  snapshot from the accepted order so the new order can reuse them. */
+  onOrderMore?: (customerName: string, customerPhone: string) => void
 }) {
   const qc = useQueryClient()
   const { data: order, isLoading } = useCustomerOrder(orderId)
@@ -172,6 +178,14 @@ export function OrderTracking({
   const curStep = stepIndex(order.status)
   const canCancel = order.status === 'NEW' || order.status === 'PENDING_PAYMENT'
   const canRequestBill = ['SERVED', 'READY'].includes(order.status) && order.paymentStatus !== 'PAID'
+  // "Order more items" is offered once the order has been accepted and is
+  // still in progress (accepted → served). It is NOT shown for brand-new
+  // orders (not accepted yet), cancelled orders, or completed orders (which
+  // already have a "Place another order" CTA). Clicking it starts a FRESH new
+  // order that reuses the customer's name & mobile.
+  const canOrderMore =
+    !!onOrderMore &&
+    ['ACCEPTED', 'PREPARING', 'READY', 'SERVED'].includes(order.status)
   const currentStepConfig = STEPS[Math.max(curStep, 0)]
   const etaText = isCompleted ? null : currentStepConfig?.etaText
   const HeroIcon = currentStepConfig?.icon || Clock
@@ -477,6 +491,34 @@ export function OrderTracking({
             )}
           </AnimatePresence>
         </motion.div>
+
+        {/* ----- Order more items (offered once the order is accepted) ----- */}
+        {canOrderMore && (
+          <motion.button
+            type="button"
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            onClick={() =>
+              onOrderMore?.(order.customerName || '', order.customerPhone || '')
+            }
+            className="mt-4 flex w-full items-center gap-3 rounded-2xl border border-orange-200 bg-gradient-to-br from-orange-50 to-white p-4 text-left shadow-sm transition-all hover:border-orange-300 hover:shadow-md active:scale-[0.99]"
+          >
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm">
+              <PlusCircle className="h-6 w-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-bold text-slate-900">
+                Order more items
+              </p>
+              <p className="mt-0.5 text-[12px] leading-snug text-slate-500">
+                Place a fresh new order with the same name &amp; mobile — it
+                goes through cart &amp; payment as a separate order.
+              </p>
+            </div>
+            <ArrowRight className="h-5 w-5 shrink-0 text-orange-500" />
+          </motion.button>
+        )}
 
         {/* ----- Status messages (paid / completed) ----- */}
         {isPaid && !isCompleted && (
