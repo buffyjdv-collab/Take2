@@ -55,6 +55,7 @@ import {
   ShieldAlert,
   Send,
   Wallet,
+  Banknote,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatINR, formatRelative } from '@/lib/format'
@@ -392,6 +393,55 @@ export function PlatformFeesCollected() {
     onError: (err: Error) => toast.error(err.message || 'Failed to collect'),
   })
 
+  // ----- Pending payments awaiting admin confirmation -----
+  // Tenants who pick "Cash" create a PROCESSING payment that the super admin
+  // must confirm receipt of (the tenant can't self-verify cash — they could
+  // otherwise mark their own fees paid without actually paying). This query
+  // fetches all PROCESSING payments; the admin can confirm (verify PAID) or
+  // reject (verify FAILED) each one.
+  const { data: pendingPayments } = useQuery({
+    queryKey: ['platform-pending-payments'],
+    queryFn: async () => {
+      const res = await fetch('/api/platform/fees/payments?status=PROCESSING&take=50')
+      if (!res.ok) throw new Error('Failed to load pending payments')
+      const json = await res.json()
+      return (json.data || []) as Array<{
+        id: string
+        amount: number
+        method: string
+        status: string
+        note: string | null
+        createdAt: string
+        feesCovered: number
+        restaurant: { id: string; name: string; plan: string }
+      }>
+    },
+    refetchInterval: 20_000,
+  })
+
+  const verifyPaymentMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: 'PAID' | 'FAILED' }) => {
+      const res = await fetch(`/api/platform/fees/payments/${id}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || 'Failed to verify payment')
+      }
+      return res.json()
+    },
+    onSuccess: (_json, vars) => {
+      toast.success(
+        vars.status === 'PAID' ? 'Payment confirmed — fees collected' : 'Payment rejected',
+      )
+      qc.invalidateQueries({ queryKey: ['platform-pending-payments'] })
+      qc.invalidateQueries({ queryKey: ['platform-fees'] })
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to verify payment'),
+  })
+
   // ----- Realtime subscriptions -----
   // When a tenant pays their platform fees, the `platform:feePaid` event
   // fires. We refetch the platform fees summary so the by-tenant table and
@@ -403,6 +453,7 @@ export function PlatformFeesCollected() {
         description: `${formatINR(payload.amount)} from ${payload.restaurantName}`,
       })
       qc.invalidateQueries({ queryKey: ['platform-fees'] })
+      qc.invalidateQueries({ queryKey: ['platform-pending-payments'] })
     },
   )
 
@@ -415,6 +466,7 @@ export function PlatformFeesCollected() {
         description: `${payload.restaurantName} initiated ${formatINR(payload.amount)}`,
       })
       qc.invalidateQueries({ queryKey: ['platform-fees'] })
+      qc.invalidateQueries({ queryKey: ['platform-pending-payments'] })
     },
   )
 
@@ -581,6 +633,98 @@ export function PlatformFeesCollected() {
         <KpiCard label="Refunded" value={formatINR(data.totalRefunded)} icon={<IndianRupee className="h-4 w-4" />} tone="purple" />
         <KpiCard label="Total fees" value={String(data.totalFees)} icon={<TrendingUp className="h-4 w-4" />} tone="blue" />
       </div>
+
+      {/* Pending payments awaiting admin confirmation (cash / offline) */}
+      {pendingPayments && pendingPayments.length > 0 && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Payments awaiting your confirmation
+              <Badge variant="secondary" className="ml-1">{pendingPayments.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-slate-50 text-left">
+                  <tr>
+                    <th className="px-4 py-2 text-xs font-semibold uppercase text-muted-foreground">Restaurant</th>
+                    <th className="px-4 py-2 text-xs font-semibold uppercase text-muted-foreground">Method</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold uppercase text-muted-foreground">Amount</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold uppercase text-muted-foreground">Fees</th>
+                    <th className="px-4 py-2 text-xs font-semibold uppercase text-muted-foreground">Initiated</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold uppercase text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pendingPayments.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50/60">
+                      <td className="px-4 py-2.5">
+                        <div className="font-medium text-slate-800">{p.restaurant.name}</div>
+                        <div className="text-xs text-muted-foreground">{p.restaurant.plan}</div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge
+                          variant="outline"
+                          className={
+                            p.method === 'CASH'
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-700'
+                          }
+                        >
+                          {p.method === 'CASH' && <Banknote className="mr-1 h-3 w-3" />}
+                          {p.method}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-bold text-slate-900">
+                        {formatINR(p.amount)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-muted-foreground">{p.feesCovered}</td>
+                      <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                        {formatRelative(p.createdAt)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="flex justify-end gap-1.5">
+                          <Button
+                            size="sm"
+                            className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700"
+                            disabled={verifyPaymentMutation.isPending}
+                            onClick={() =>
+                              verifyPaymentMutation.mutate({ id: p.id, status: 'PAID' })
+                            }
+                          >
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Confirm
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs text-red-600 hover:bg-red-50"
+                            disabled={verifyPaymentMutation.isPending}
+                            onClick={() =>
+                              verifyPaymentMutation.mutate({ id: p.id, status: 'FAILED' })
+                            }
+                          >
+                            <Ban className="mr-1 h-3.5 w-3.5" />
+                            Reject
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t bg-amber-50/50 px-4 py-2.5 text-xs text-amber-800">
+              <AlertTriangle className="mr-1 inline h-3 w-3" />
+              These tenants declared a cash / offline payment. Confirm only after
+              you have physically received the cash. Confirming marks the covered
+              fees as COLLECTED; rejecting returns them to PENDING.
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Overdue tenants — pending fees older than 30 days */}
       <OverdueTenantsCard

@@ -12,8 +12,11 @@ export const dynamic = 'force-dynamic'
 const schema = z.object({
   // Amount to pay (rupees). If null/undefined, defaults to outstanding.
   amount: z.number().positive().optional(),
-  // Payment method type — must match an active PlatformPaymentMethod.type
-  method: z.enum(['UPI', 'QR', 'CARD', 'WALLET', 'NETBANKING']),
+  // Payment method type — must match an active PlatformPaymentMethod.type.
+  // CASH is a tenant-declared offline payment: it creates a PROCESSING payment
+  // that the super admin must confirm receipt of (no auto-verify), since the
+  // tenant could otherwise mark their own fees paid without actually paying.
+  method: z.enum(['UPI', 'QR', 'CARD', 'WALLET', 'NETBANKING', 'CASH']),
   // Optional payment-method id (if tenant picked a specific row)
   paymentMethodId: z.string().optional(),
   // Optional payment request ID — if paying off a specific admin request
@@ -196,6 +199,29 @@ export async function POST(req: NextRequest) {
       initiatedAt: new Date().toISOString(),
     },
   })
+
+  // CASH is a tenant-declared offline payment — the tenant indicates they'll
+  // hand cash to the platform admin. We must NOT auto-verify (the tenant could
+  // otherwise mark their own fees paid without actually paying). Instead, the
+  // super admin confirms receipt via /api/platform/fees/payments/[id]/verify.
+  // We signal this to the client with `awaitingAdminConfirmation: true` and no
+  // verifyInMs, so the tenant UI shows an "awaiting confirmation" state.
+  if (input.method === 'CASH') {
+    return ok({
+      paymentId: payment.id,
+      providerTxnId,
+      amount: actualAmount,
+      method: input.method,
+      paymentMethodId: methodRow.id,
+      paymentMethodLabel: methodRow.label,
+      upiDeepLink: undefined,
+      upiQrPayload: undefined,
+      upiId: undefined,
+      feesCovered: coveredFeeIds.length,
+      awaitingAdminConfirmation: true,
+      verifyInMs: 0,
+    })
+  }
 
   return ok({
     paymentId: payment.id,

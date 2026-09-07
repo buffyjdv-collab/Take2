@@ -37,6 +37,15 @@ const DEFAULTS = [
     config: JSON.stringify({ provider: 'MOCK' }),
   },
   {
+    type: 'CASH',
+    label: 'Cash',
+    description: 'Hand cash to the platform admin (offline)',
+    icon: 'Banknote',
+    accentColor: '#16A34A',
+    priority: 35,
+    config: JSON.stringify({ provider: 'OFFLINE' }),
+  },
+  {
     type: 'WALLET',
     label: 'Mobile Wallet',
     description: 'PhonePe · Paytm · Mobikwik',

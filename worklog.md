@@ -646,3 +646,28 @@ Stage Summary:
 - Feature complete and browser-verified. When a customer places a new order while an old one is active (same mobile), the tracking page shows ALL active orders for that number as independently collapsible/expandable cards — each with its own tracking stepper, items, bill details, and actions.
 - New files: src/app/api/customer/orders/active/route.ts, src/components/customer/order-tracking-list.tsx
 - Modified: src/hooks/api.ts, src/components/customer/{checkout-sheet,cart-drawer,customer-app}.tsx
+
+---
+Task ID: 4
+Agent: main (z.ai code)
+Task: Implement platform fee collection for super admin and platform fee payment options for restaurant by cash, upi, card.
+
+Work Log:
+- The platform fee system already existed (commit a029669): super admin can request/collect fees, tenant can pay via UPI/QR/Card/Wallet/NetBanking. Gap identified: CASH was missing as a tenant-initiated payment option, and the super admin UI had no "confirm pending payment" section.
+- Added CASH to the tenant initiate API (src/app/api/admin/platform-fees/initiate/route.ts): extended the zod schema enum to include 'CASH'. When method=CASH, creates a PROCESSING payment (fees linked but stay PENDING) and returns awaitingAdminConfirmation=true with verifyInMs=0 so the tenant UI does NOT auto-verify (a tenant can't self-verify cash — they could otherwise mark their own fees paid without paying).
+- Updated tenant UI (src/components/admin/platform-fees-panel.tsx): added Banknote to ICON_MAP; the onSuccess handler now checks for awaitingAdminConfirmation and shows a "Cash payment recorded — please hand cash to the platform admin" toast (no auto-verify), instead of the mock-verify flow used for UPI/Card.
+- Added CASH to the platform payment methods seed (scripts/seed-platform-payments.ts): label "Cash", icon "Banknote", accentColor green, config provider OFFLINE. Ran the seed on Neon — CASH method created and active.
+- Added "Payments awaiting your confirmation" section to the super admin UI (src/components/platform/platform-fees-collected.tsx): new useQuery fetching PROCESSING payments from /api/platform/fees/payments?status=PROCESSING; new verifyPaymentMutation calling /api/platform/fees/payments/[id]/verify with status PAID or FAILED. Renders a card (right after KPIs) with a table: restaurant, method (Cash badge with Banknote icon), amount, fees covered, initiated time, and Confirm (green) / Reject (red) buttons. Realtime subscriptions (platform:feePaymentInit, platform:feePaid) refetch the pending-payments query. Added Banknote import.
+- Lint clean (0 errors).
+
+Verification (Agent Browser + DB on Neon):
+- Created a PROCESSING CASH payment in the DB (₹3.48, 4 fees covered) simulating the tenant initiate API.
+- Logged in as super admin (admin@platform.com), navigated to #platform-fees.
+- Confirmed the "Payments awaiting your confirmation" card rendered with the CASH badge and a Confirm button (has-awaiting-card: true, has-confirm: true, has-cash-badge: true).
+- Clicked Confirm → DB verified: payment status=PAID, verifiedBy=Platform Super Admin, verifiedAt set; all 4 covered fees transitioned PENDING→COLLECTED (Spice Garden PENDING fees: 0).
+- Tenant panel showed ₹0 outstanding after confirm (proving fees were cleared by the admin confirm).
+
+Stage Summary:
+- Platform fee collection for super admin: complete (Request + Collect + new Confirm-pending-payment flow for cash).
+- Restaurant payment options by Cash, UPI, Card: complete (Cash added alongside existing UPI/Card/Wallet/NetBanking; Cash uses offline admin-confirm flow, UPI/Card use mock auto-verify).
+- Changed files: src/app/api/admin/platform-fees/initiate/route.ts, src/components/admin/platform-fees-panel.tsx, src/components/platform/platform-fees-collected.tsx, scripts/seed-platform-payments.ts.

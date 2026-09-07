@@ -53,6 +53,7 @@ import {
   ChevronRight,
   ArrowRightCircle,
   Ban,
+  Banknote,
 } from 'lucide-react'
 import { type LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -130,6 +131,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   CreditCard,
   Wallet,
   Building2,
+  Banknote,
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +235,19 @@ export function PlatformFeesPanel() {
     },
     onSuccess: async (json) => {
       const data = json.data
+      // CASH: tenant-declared offline payment — do NOT auto-verify. The super
+      // admin must confirm receipt of cash via the platform admin UI. Show a
+      // clear "awaiting confirmation" state to the tenant.
+      if (data.awaitingAdminConfirmation) {
+        toast.success('Cash payment recorded', {
+          description: `Please hand ${formatINR(data.amount)} to the platform admin. They will confirm receipt shortly.`,
+          duration: 6000,
+        })
+        qc.invalidateQueries({ queryKey: ['admin-platform-fees'] })
+        setPayOpen(false)
+        setPayingMethod(null)
+        return
+      }
       // For UPI/QR: open the deep link in a new tab (mobile) or show a toast
       if (data.upiDeepLink) {
         if (typeof window !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent)) {
