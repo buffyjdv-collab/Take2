@@ -734,3 +734,22 @@ Work Log:
 Stage Summary:
 - Uploads now survive transient filesystem hiccups via automatic retries. If a write genuinely fails (e.g. ENOSPC), the error message includes the specific error code so it's actionable. The TOCTOU race is eliminated.
 - Modified: src/app/api/admin/upload/route.ts
+
+---
+Task ID: 8
+Agent: main (z.ai code)
+Task: Fix "Could not save the file to the server (write failed: EROFS)" upload error.
+
+Work Log:
+- Root cause: the sandbox's /public folder sits on a `volatile` overlay filesystem that intermittently flips to read-only (EROFS = Error Read-Only File System). The retry logic from the previous fix correctly identified EROFS as non-transient (retrying the same dir won't help), so it surfaced the error.
+- Discovered the sandbox has a dedicated always-writable mount: /home/z/my-project/upload (fuse.ossfs, persistent across container restarts). This is the designated upload store.
+- Created src/lib/uploads.ts: a shared resolver (getUploadDir) that picks the best writable location — prefers UPLOAD_DIR env var, then /home/z/my-project/upload (OSS mount), then public/uploads (static fallback). Caches the result. Also provides toPublicUrl() which always returns /uploads/<name> regardless of backing store.
+- Updated /api/admin/upload/route.ts: uses getUploadDir() to resolve the write location. On EROFS, instead of giving up, switches to the OSS mount (always writable) and retries — so uploads never fail due to a read-only FS.
+- Created src/app/uploads/[...path]/route.ts: a catch-all GET route that serves files stored OUTSIDE /public (i.e. in the OSS mount) at /uploads/<name>. Next.js serves files in public/uploads/ statically first; this route only fires for files not in /public (the OSS-stored ones). Includes path-traversal protection (rejects ..) and sets a 1-year immutable cache. Infers content-type from extension.
+- The hybrid serving means existing <img src="/uploads/..."> references work unchanged: files in public/uploads are served statically; files in the OSS mount are served by the catch-all route. Same URL, different backing store, transparent to the frontend.
+- Verified: getUploadDir() resolves to /home/z/my-project/upload (OSS mount); upload HTTP 200; file lands in OSS mount; serving route returns the image (HTTP 200, image/png, size matches); path-traversal blocked (404); admin sidebar logo loaded=true; QR menu header logo loaded=true naturalWidth=32; no EROFS errors in dev.log.
+
+Stage Summary:
+- The EROFS error is permanently eliminated: uploads now go to the always-writable OSS mount, and a catch-all route serves them at /uploads/<name>. The volatile public/uploads overlay is no longer used for writes. The frontend is unchanged.
+- New files: src/lib/uploads.ts, src/app/uploads/[...path]/route.ts
+- Modified: src/app/api/admin/upload/route.ts

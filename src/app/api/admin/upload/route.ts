@@ -3,6 +3,7 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { requirePermission, ok, fail, getSessionUser } from '@/lib/api-helpers'
 import { hasPermission } from '@/lib/auth'
+import { getUploadDir, toPublicUrl } from '@/lib/uploads'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +15,6 @@ const ACCEPTED_IMAGE_TYPES = [
   'image/svg+xml',
 ]
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads')
 const MAX_WRITE_RETRIES = 3
 
 /**
@@ -111,15 +111,18 @@ export async function POST(req: NextRequest) {
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`
     const safeName = unique.replace(/[^a-zA-Z0-9.\-]/g, '')
 
-    // 5. Ensure the uploads directory exists.
-    //    `mkdir { recursive: true }` is idempotent — it won't throw if the dir
-    //    already exists, so we call it unconditionally (avoids the TOCTOU race
-    //    between existsSync and mkdir that could cause intermittent failures
-    //    when two uploads happen concurrently or when the FS state changes).
+    // 5. Resolve the upload directory.
+    //    Prefers the always-writable OSS mount (/home/z/my-project/upload)
+    //    over the volatile public/uploads overlay (which intermittently
+    //    flips to read-only / EROFS). Falls back automatically if the
+    //    preferred location isn't writable.
+    const uploadDir = getUploadDir()
+
+    // Ensure the directory exists (idempotent — won't throw if it exists).
     try {
-      await mkdir(UPLOAD_DIR, { recursive: true })
+      await mkdir(uploadDir, { recursive: true })
     } catch (err: any) {
-      console.error('[upload] mkdir failed:', UPLOAD_DIR, err?.code || err?.message || err)
+      console.error('[upload] mkdir failed:', uploadDir, err?.code || err?.message || err)
       return fail(
         `Could not create the uploads directory (${err?.code || 'unknown error'}). Please contact support.`,
         500,
@@ -127,10 +130,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 6. Write the file to disk, retrying on transient failures.
-    //    The sandbox filesystem can occasionally hiccup (EBUSY / EAGAIN /
-    //    transient EACCES) especially right after a dev-server hot reload or
-    //    when the container's overlay FS syncs. Retrying with a tiny back-off
-    //    turns these into silent successes instead of hard failures.
+    //    Transient FS errors (EBUSY/EAGAIN/transient EACCES) are retried with
+    //    a tiny back-off. EROFS (read-only filesystem) is NOT retried — instead
+    //    we switch to the fallback directory (the always-writable OSS mount)
+    //    on the next attempt, so uploads never fail due to a read-only FS.
     let bytes: ArrayBuffer
     try {
       bytes = await file.arrayBuffer()
@@ -138,10 +141,11 @@ export async function POST(req: NextRequest) {
       return fail('Could not read the file data. Please try again with a different file.', 400)
     }
     const buffer = Buffer.from(bytes)
-    const fullPath = path.join(UPLOAD_DIR, safeName)
 
     let lastErr: any = null
+    let writeDir = uploadDir
     for (let attempt = 1; attempt <= MAX_WRITE_RETRIES; attempt++) {
+      const fullPath = path.join(writeDir, safeName)
       try {
         await writeFile(fullPath, buffer)
         lastErr = null
@@ -149,8 +153,24 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         lastErr = err
         const code = err?.code || ''
-        // Transient FS errors worth retrying: EBUSY, EAGAIN, EDEADLK,
-        // EACCES (can flip after a hot reload), ENOENT (dir vanished mid-write).
+        // EROFS = read-only filesystem — don't retry the SAME dir; switch to
+        // the fallback (OSS mount) which is always writable.
+        if (code === 'EROFS') {
+          console.warn('[upload] EROFS on', writeDir, '→ switching to fallback')
+          const fallback = path.join(process.cwd(), 'public', 'uploads')
+          // If we were already on public/uploads (EROFS), switch to the OSS mount
+          writeDir =
+            writeDir === fallback ? '/home/z/my-project/upload' : writeDir
+          // Forcibly re-resolve via getUploadDir which picks a writable dir
+          writeDir = getUploadDir()
+          try {
+            await mkdir(writeDir, { recursive: true })
+          } catch {
+            /* ignore — will retry the write */
+          }
+          continue
+        }
+        // Transient FS errors worth retrying in place.
         const transient =
           code === 'EBUSY' ||
           code === 'EAGAIN' ||
@@ -166,12 +186,10 @@ export async function POST(req: NextRequest) {
           transient ? 'retrying' : 'giving up',
         )
         if (!transient || attempt === MAX_WRITE_RETRIES) break
-        // tiny back-off before retry: 50ms, 150ms
         await new Promise((r) => setTimeout(r, 50 * attempt))
-        // If the dir vanished (ENOENT), recreate it before the next attempt
         if (code === 'ENOENT') {
           try {
-            await mkdir(UPLOAD_DIR, { recursive: true })
+            await mkdir(writeDir, { recursive: true })
           } catch {
             /* will retry the write anyway */
           }
@@ -182,7 +200,7 @@ export async function POST(req: NextRequest) {
     if (lastErr) {
       const code = lastErr?.code || 'unknown'
       const msg = lastErr?.message || String(lastErr)
-      console.error('[upload] all write attempts failed:', UPLOAD_DIR, code, msg)
+      console.error('[upload] all write attempts failed:', writeDir, code, msg)
       return fail(
         `Could not save the file to the server (write failed: ${code}). ` +
           `Please try again — if it keeps failing, refresh the page and retry.`,
@@ -190,8 +208,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 7. Public URL — served by Next.js from the /public folder
-    const url = `/uploads/${safeName}`
+    // 7. Public URL — /uploads/<name>. Served either statically from
+    //    public/uploads (when stored there) or by the catch-all route
+    //    src/app/uploads/[...path]/route.ts (when stored in the OSS mount).
+    const url = toPublicUrl(safeName)
     return ok({ url, filename: safeName, size: file.size, type: fileMime })
   } catch (err: any) {
     // Top-level safety net: never return an opaque 500. Surface a clear message
