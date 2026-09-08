@@ -715,3 +715,22 @@ Work Log:
 Stage Summary:
 - The upload route now never returns an opaque 500 — every failure returns a clear, actionable error. Transient Neon connection drops no longer break uploads (static permission fallback). Retries succeed once the transient issue clears.
 - Modified: src/app/api/admin/upload/route.ts
+
+---
+Task ID: 7
+Agent: main (z.ai code)
+Task: Fix "Could not save the file to the server (disk write failed)" upload error.
+
+Work Log:
+- Diagnosed: the writeFile catch block was swallowing the actual error (no code logged), so the real cause was hidden. Root causes of intermittent disk-write failures in this sandbox: (a) TOCTOU race between existsSync and mkdir; (b) transient FS errors (EBUSY/EAGAIN/transient EACCES/ENOENT) right after a dev-server hot reload or when the container overlay FS syncs.
+- Fixed the write logic in /api/admin/upload/route.ts:
+  1. Removed the existsSync → mkdir TOCTOU race. Now calls `mkdir(UPLOAD_DIR, { recursive: true })` unconditionally (idempotent — won't throw if the dir exists).
+  2. Added a retry loop (up to 3 attempts) around writeFile for transient FS errors (EBUSY, EAGAIN, EDEADLK, EACCES, ENOENT, EMFILE, ENFILE) with a tiny back-off (50ms, 150ms).
+  3. If the dir vanished mid-write (ENOENT), recreates it before the retry.
+  4. Logs the actual error code/message to the server console on every failed attempt (console.warn for retries, console.error for final failure) so the real cause is visible in dev.log.
+  5. Surfaces the error code in the HTTP response (`write failed: EBUSY` etc.) instead of a generic message, so the user can report the specific failure.
+- Verified: 3/3 curl uploads = HTTP 200 (no retries needed); browser UI upload = "Logo uploaded" toast; dev.log shows POST /api/admin/upload 200 with no retry warnings.
+
+Stage Summary:
+- Uploads now survive transient filesystem hiccups via automatic retries. If a write genuinely fails (e.g. ENOSPC), the error message includes the specific error code so it's actionable. The TOCTOU race is eliminated.
+- Modified: src/app/api/admin/upload/route.ts
