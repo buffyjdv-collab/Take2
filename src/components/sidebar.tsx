@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { useAdminSettings } from '@/hooks/api'
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -89,6 +90,13 @@ export function Sidebar({
   // user immediately (within 30s, the cache TTL on the server).
   const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(null)
 
+  // Fetch the restaurant logo for the sidebar brand. This hook is cached by
+  // TanStack Query and shared with the SettingsManager, so it doesn't add an
+  // extra network request. Only fires for restaurant roles (super admin has
+  // no restaurantId and is handled by the platform-view branch below).
+  const { data: settings } = useAdminSettings()
+  const restaurantLogo = role === 'SUPER_ADMIN' ? null : settings?.logo
+
   useEffect(() => {
     if (!role || role === 'SUPER_ADMIN') return // super admin sees everything
     let cancelled = false
@@ -121,8 +129,16 @@ export function Sidebar({
   return (
     <aside className="flex h-full w-[240px] flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-600 text-white">
-          <QrCode className="h-5 w-5" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-600 text-white overflow-hidden">
+          {restaurantLogo ? (
+            <img
+              src={restaurantLogo}
+              alt={restaurantName || 'Restaurant logo'}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <QrCode className="h-5 w-5" />
+          )}
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-bold leading-tight">

@@ -13,6 +13,7 @@ import { LoadingSpinner, ButtonWithLoading, EmptyState } from '@/components/rest
 import { toast } from 'sonner'
 import { useSession } from 'next-auth/react'
 import { PaymentMethodsManager } from './payment-methods-manager'
+import { ImageUploader } from './image-uploader'
 import { PlatformFeesPanel } from './platform-fees-panel'
 
 export function SettingsManager() {
@@ -143,7 +144,16 @@ export function SettingsManager() {
               <Field label="Phone"><Input value={form.phone || ''} onChange={(e) => set({ phone: e.target.value })} /></Field>
               <Field label="Email"><Input value={form.email || ''} onChange={(e) => set({ email: e.target.value })} /></Field>
               <Field label="Website"><Input value={form.website || ''} onChange={(e) => set({ website: e.target.value })} /></Field>
-              <Field label="Logo URL"><Input value={form.logo || ''} onChange={(e) => set({ logo: e.target.value })} /></Field>
+              <div className="sm:col-span-2">
+                <Label className="mb-1 block text-xs">Restaurant logo</Label>
+                <ImageUploader
+                  value={form.logo || ''}
+                  onChange={(url) => set({ logo: url })}
+                  shape="round"
+                  label="Logo"
+                  hint="Shown on the QR menu header and the admin sidebar. PNG / JPEG / WebP / SVG, up to 5MB."
+                />
+              </div>
               <Field label="Description" full>
                 <textarea
                   className="w-full rounded-md border px-3 py-2 text-sm"

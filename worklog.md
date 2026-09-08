@@ -671,3 +671,29 @@ Stage Summary:
 - Platform fee collection for super admin: complete (Request + Collect + new Confirm-pending-payment flow for cash).
 - Restaurant payment options by Cash, UPI, Card: complete (Cash added alongside existing UPI/Card/Wallet/NetBanking; Cash uses offline admin-confirm flow, UPI/Card use mock auto-verify).
 - Changed files: src/app/api/admin/platform-fees/initiate/route.ts, src/components/admin/platform-fees-panel.tsx, src/components/platform/platform-fees-collected.tsx, scripts/seed-platform-payments.ts.
+
+---
+Task ID: 5
+Agent: main (z.ai code)
+Task: Restaurant owner can upload his logo and it should display in his restaurant name place and QR menu page when customer scans QR menu.
+
+Work Log:
+- Created /api/admin/upload route: handles multipart/form-data file upload (field name "file"), validates MIME (PNG/JPEG/WebP/GIF/SVG) + 5MB max, saves to public/uploads/<unique-name>, returns { url }. This also fixes the pre-existing broken menu image upload (menu-manager referenced this route but it didn't exist).
+- Created shared src/components/admin/image-uploader.tsx: drag/drop + click-to-browse uploader with round/card preview shapes, manual URL input fallback, upload progress spinner, remove button. Reusable across settings + menu manager.
+- Updated settings-manager.tsx: replaced the "Logo URL" text field with the ImageUploader (shape="round") so the owner can upload a logo file directly. Hint: "Shown on the QR menu header and the admin sidebar."
+- Updated customer restaurant-header.tsx: if restaurant.logo exists, renders a circular logo image (h-8 w-8, rounded-full, white bg, ring) before the restaurant name in the sticky QR menu header.
+- Updated sidebar.tsx: uses useAdminSettings() (cached/shared query) to fetch the restaurant logo; if present, shows it in the brand area instead of the default QrCode icon. Super admins still see the QrCode icon (no restaurant scope).
+- Lint clean (0 errors).
+
+Verification (Agent Browser + curl on Neon):
+- Upload API: curl POST /api/admin/upload with a test PNG → HTTP 200, returned { url: "/uploads/..." }, file saved to public/uploads/.
+- Set logo on Spice Garden → logged in as owner.
+- Admin sidebar: img with src=/uploads/...png, alt="Spice Garden" ✅
+- QR menu header (?table=...): img with src=/uploads/...png, alt="Spice Garden", next to restaurant name "Spice Garden" ✅
+- Settings page: logo preview shown in the ImageUploader ✅
+- No page errors.
+
+Stage Summary:
+- Feature complete: owner uploads a logo in Settings → Profile tab; it displays in the admin sidebar brand area (replacing the QrCode icon) and on the customer QR menu header (next to the restaurant name). The upload route also unblocks menu item image uploads.
+- New files: src/app/api/admin/upload/route.ts, src/components/admin/image-uploader.tsx
+- Modified: src/components/admin/settings-manager.tsx, src/components/customer/restaurant-header.tsx, src/components/sidebar.tsx

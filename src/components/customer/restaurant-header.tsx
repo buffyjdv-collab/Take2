@@ -70,7 +70,7 @@ export function RestaurantHeader({
           <ArrowLeft className="h-5 w-5" />
         </Button>
 
-        {/* Restaurant name + table/tagline — clickable to return to menu */}
+        {/* Restaurant logo + name + table/tagline — clickable to return to menu */}
         <div
           className="min-w-0 flex-1 cursor-pointer"
           onClick={onBackToMenu}
@@ -83,9 +83,18 @@ export function RestaurantHeader({
             }
           }}
         >
-          <h1 className="truncate text-[15px] font-bold leading-tight">
-            {restaurant.name}
-          </h1>
+          <div className="flex items-center gap-2">
+            {restaurant.logo ? (
+              <img
+                src={restaurant.logo}
+                alt={restaurant.name}
+                className="h-8 w-8 shrink-0 rounded-full bg-white/90 object-cover shadow-sm ring-1 ring-white/40"
+              />
+            ) : null}
+            <h1 className="truncate text-[15px] font-bold leading-tight">
+              {restaurant.name}
+            </h1>
+          </div>
           <p className="truncate text-[11px] leading-tight text-white/85">
             Table {table.number}
             {restaurant.tagline && (
