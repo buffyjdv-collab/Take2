@@ -753,3 +753,18 @@ Stage Summary:
 - The EROFS error is permanently eliminated: uploads now go to the always-writable OSS mount, and a catch-all route serves them at /uploads/<name>. The volatile public/uploads overlay is no longer used for writes. The frontend is unchanged.
 - New files: src/lib/uploads.ts, src/app/uploads/[...path]/route.ts
 - Modified: src/app/api/admin/upload/route.ts
+
+---
+Task ID: 8
+Agent: main (z.ai code)
+Task: Fix "Could not save the file to the server (write failed: EROFS)" upload error.
+
+Work Log:
+- Root cause: EROFS = Read-Only File System. The sandbox's overlay root FS (where public/uploads sits) intermittently flips to read-only during maintenance. The existing getUploadDir() resolver was caching its result for the process lifetime — so if public/uploads was writable at startup (cached), uploads would keep targeting it even after it flipped read-only, causing EROFS.
+- Fix in src/lib/uploads.ts: made getUploadDir() NON-cached. It now re-checks writability on EVERY call (accessSync W_OK), so when public/uploads flips read-only it automatically falls through to the always-writable persistent tmpfs mount at /home/z/my-project/upload. The tiny accessSync cost is negligible vs a disk write. Added invalidateUploadDirCache() helper for future use.
+- The rest of the infrastructure was already in place: a catch-all route (src/app/uploads/[...path]/route.ts) serves files stored in the tmpfs at /uploads/<name>, and toPublicUrl() returns /uploads/<name> so <img src="/uploads/..."> works regardless of backing dir.
+- Verified end-to-end on Neon via Agent Browser: owner uploaded a logo → toast "Logo uploaded" → file stored in /home/z/my-project/upload/ (tmpfs, NOT public/uploads) → served at /uploads/<name> (HTTP 200, image/png) → preview shown in settings → QR menu header displays the logo (alt="Spice Garden"). No EROFS.
+
+Stage Summary:
+- EROFS fixed: uploads now target the always-writable tmpfs mount, with writability re-checked on every upload (no stale cache). The overlay FS can flip read-only without breaking uploads.
+- Modified: src/lib/uploads.ts

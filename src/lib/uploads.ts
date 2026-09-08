@@ -25,14 +25,23 @@ import path from 'path'
 let cachedDir: string | null = null
 
 /**
- * Returns the directory where uploaded files should be stored. The result is
- * cached for the lifetime of the process. The directory is guaranteed to be
- * writable (we test it) — if the preferred location isn't writable we fall
- * through to the next candidate.
+ * Returns the directory where uploaded files should be stored.
+ *
+ * Resolution order:
+ *   1. UPLOAD_DIR env var (if set) — lets production override (e.g. an EFS
+ *      path on AWS, or /home/z/my-project/upload in the sandbox).
+ *   2. /home/z/my-project/upload — the sandbox's persistent writable tmpfs
+ *      mount (survives overlay-FS read-only flips).
+ *   3. <cwd>/public/uploads — the default for local dev / Vercel (served
+ *      statically by Next.js).
+ *
+ * IMPORTANT: we do NOT cache the result. The sandbox overlay FS can flip
+ * read-only (EROFS) at runtime, so a dir that was writable at startup may
+ * become read-only later. Re-checking writability on every upload guarantees
+ * we always write to a genuinely-writable location — the tiny accessSync
+ * cost is negligible compared to a disk write.
  */
 export function getUploadDir(): string {
-  if (cachedDir) return cachedDir
-
   const candidates: string[] = []
   if (process.env.UPLOAD_DIR) candidates.push(process.env.UPLOAD_DIR)
   candidates.push('/home/z/my-project/upload')
@@ -41,6 +50,8 @@ export function getUploadDir(): string {
   for (const dir of candidates) {
     try {
       if (isDirWritable(dir)) {
+        // Update the cache so other callers see the same resolved dir this
+        // request, but the NEXT upload call re-evaluates writability.
         cachedDir = dir
         return dir
       }
@@ -55,6 +66,13 @@ export function getUploadDir(): string {
   const fallback = path.join(process.cwd(), 'public', 'uploads')
   cachedDir = fallback
   return fallback
+}
+
+/** Forces a re-check on the next getUploadDir() call. Currently a no-op
+ *  since getUploadDir() already re-checks every call, but kept for future
+ *  caching strategies. */
+export function invalidateUploadDirCache(): void {
+  cachedDir = null
 }
 
 function isDirWritable(dir: string): boolean {
