@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, ok, fail, scopeRestaurantId } from '@/lib/api-helpers'
+import { requirePermission, ok, fail, scopeRestaurantId, scopeBranchId } from '@/lib/api-helpers'
 import { resolveDateRange, enumerateDays } from '@/lib/date-range'
 
 export const dynamic = 'force-dynamic'
@@ -14,6 +14,8 @@ export async function GET(req: NextRequest) {
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  // Branch-scoped staff (branch managers) see only their branch's numbers.
+  const branchId = scopeBranchId(user)
 
   const sp = req.nextUrl.searchParams
   const range = sp.get('range') || '7d'
@@ -26,6 +28,7 @@ export async function GET(req: NextRequest) {
 
   const where = {
     ...(restaurantId ? { restaurantId } : {}),
+    ...(branchId ? { branchId } : {}),
     placedAt: { gte: dateRange.from, lte: dateRange.to },
   }
 
@@ -128,7 +131,11 @@ export async function GET(req: NextRequest) {
   const platformFees = await db.platformFee.findMany({
     where: {
       ...(restaurantId ? { restaurantId } : {}),
-      order: { placedAt: { gte: dateRange.from, lte: dateRange.to } },
+      order: {
+        placedAt: { gte: dateRange.from, lte: dateRange.to },
+        // platformFee has no branchId column — filter through the order.
+        ...(branchId ? { branchId } : {}),
+      },
     },
     select: {
       feeAmount: true,

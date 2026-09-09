@@ -52,6 +52,7 @@ export const RBAC_RESOURCES: ResourceSpec[] = [
   { key: 'MENU_CATEGORY', label: 'Menu Categories', actions: ['CREATE', 'READ', 'UPDATE', 'DELETE'] },
   { key: 'MODIFIER_GROUP', label: 'Modifier Groups', actions: ['CREATE', 'READ', 'UPDATE', 'DELETE'] },
   { key: 'TABLE', label: 'Tables & QR', actions: ['CREATE', 'READ', 'UPDATE', 'DELETE'] },
+  { key: 'BRANCH', label: 'Branches', actions: ['CREATE', 'READ', 'UPDATE', 'DELETE'] },
   { key: 'ORDER', label: 'Orders', actions: ['READ', 'UPDATE_STATUS', 'CANCEL'] },
   { key: 'KITCHEN', label: 'Kitchen Display', actions: ['VIEW'] },
   { key: 'WAITER', label: 'Waiter Dashboard', actions: ['VIEW'] },
@@ -84,6 +85,12 @@ export const DEFAULT_PERMISSIONS: Record<string, string[]> = {
   'MODIFIER_GROUP.READ': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   'MODIFIER_GROUP.UPDATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   'MODIFIER_GROUP.DELETE': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
+  // Branch management (owner-level: create locations, assign managers)
+  'BRANCHES.MANAGE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  'BRANCH.CREATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  'BRANCH.READ': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  'BRANCH.UPDATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  'BRANCH.DELETE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
   // Table & QR management
   'TABLE.CREATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   'TABLE.READ': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'WAITER'],
@@ -260,6 +267,7 @@ export const SIDEBAR_MODULES: Array<{ key: string; label: string; group: 'platfo
   { key: 'menu', label: 'Menu', group: 'restaurant' },
   { key: 'modifiers', label: 'Modifiers', group: 'restaurant' },
   { key: 'tables', label: 'Tables & QR', group: 'restaurant' },
+  { key: 'branches', label: 'Branches', group: 'restaurant' },
   { key: 'kitchen', label: 'Kitchen', group: 'restaurant' },
   { key: 'waiter', label: 'Waiter', group: 'restaurant' },
   { key: 'billing', label: 'Billing', group: 'restaurant' },
@@ -283,6 +291,7 @@ export const DEFAULT_MODULE_VISIBILITY: Record<string, string[]> = {
   menu: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   modifiers: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   tables: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
+  branches: ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
   kitchen: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'KITCHEN_STAFF'],
   waiter: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'WAITER'],
   billing: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'CASHIER'],
@@ -395,6 +404,7 @@ export const authOptions: NextAuthOptions = {
             branchId: user.branchId,
             restaurantName: user.restaurant?.name,
             restaurantSlug: user.restaurant?.slug,
+            branchName: user.branch?.name,
           } as any
         } catch (err) {
           console.error('[auth] authorize error:', err)
@@ -414,6 +424,7 @@ export const authOptions: NextAuthOptions = {
         token.branchId = (user as any).branchId
         token.restaurantName = (user as any).restaurantName
         token.restaurantSlug = (user as any).restaurantSlug
+        token.branchName = (user as any).branchName
       }
       return token
     },
@@ -425,6 +436,7 @@ export const authOptions: NextAuthOptions = {
         ;(session.user as any).branchId = token.branchId
         ;(session.user as any).restaurantName = token.restaurantName
         ;(session.user as any).restaurantSlug = token.restaurantSlug
+        ;(session.user as any).branchName = token.branchName
       }
       return session
     },

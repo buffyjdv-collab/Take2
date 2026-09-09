@@ -22,7 +22,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { useAdminStaff, api } from '@/hooks/api'
+import { useAdminStaff, useAdminBranches, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import {
@@ -80,6 +80,8 @@ export function StaffManager() {
   const myRole = ((session?.user as any)?.role as string) || ''
   const isSuperAdmin = myRole === 'SUPER_ADMIN'
   const assignableRoles = getAssignableRoles(myRole)
+  const { data: branchData } = useAdminBranches()
+  const branches = branchData?.branches || []
 
   // ----- Derived data -----
   const stats = useMemo(() => {
@@ -121,6 +123,7 @@ export function StaffManager() {
       role: assignableRoles[0] || 'WAITER',
       phone: '',
       active: true,
+      branchId: '',
     })
     setOpen(true)
   }
@@ -133,6 +136,7 @@ export function StaffManager() {
           role: editing.role,
           active: editing.active,
           phone: editing.phone,
+          branchId: editing.branchId || null,
         }
         if (editing.password) patch.password = editing.password
         await api(`/api/admin/staff/${editing.id}`, {
@@ -532,6 +536,34 @@ export function StaffManager() {
                     ))}
                   </SelectContent>
                 </Select>
+                {branches.length > 0 && (
+                  <div className="mt-2">
+                    <Label>Branch (optional)</Label>
+                    <Select
+                      value={editing.branchId || '__none__'}
+                      onValueChange={(v) =>
+                        setEditing({ ...editing, branchId: v === '__none__' ? '' : v })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Restaurant-wide" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">
+                          All branches (restaurant-wide)
+                        </SelectItem>
+                        {branches.map((b: any) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Assign to a branch to scope this staff member to that location only.
+                    </p>
+                  </div>
+                )}
                 {editing.role && (
                   <div className="mt-2 rounded-lg border bg-slate-50 p-2">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Permissions for {ROLE_LABELS[editing.role] || editing.role}</p>

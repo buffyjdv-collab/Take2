@@ -20,9 +20,16 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet'
-import { useAdminTables, api } from '@/hooks/api'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { useAdminTables, useAdminBranches, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users, ExternalLink, Copy, Check } from 'lucide-react'
+import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users, ExternalLink, Copy, Check, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { LoadingSpinner, EmptyState, ButtonWithLoading } from '@/components/restaurant/loading-states'
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
@@ -40,6 +47,8 @@ const STATUS_COLOR: Record<string, string> = {
 
 export function TablesManager() {
   const { data, isLoading } = useAdminTables()
+  const { data: branchData } = useAdminBranches()
+  const branches = branchData?.branches || []
   const qc = useQueryClient()
   const [editing, setEditing] = useState<any | null>(null)
   const [open, setOpen] = useState(false)
@@ -49,7 +58,10 @@ export function TablesManager() {
   const [copied, setCopied] = useState(false)
 
   const handleNew = () => {
-    setEditing({ number: '', label: '', capacity: 4, active: true })
+    // Single visible branch (e.g. a branch manager scoped to one location, or
+    // a single-branch restaurant) → default new tables to it.
+    const defaultBranchId = branches.length === 1 ? branches[0].id : ''
+    setEditing({ number: '', label: '', capacity: 4, active: true, branchId: defaultBranchId })
     setOpen(true)
   }
 
@@ -159,6 +171,11 @@ export function TablesManager() {
                   <div className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
                     <Users className="h-3 w-3" />
                     <span>{t.capacity} seats</span>
+                    {t.branch?.name && (
+                      <span className="ml-1 inline-flex items-center gap-0.5 rounded-full bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+                        <MapPin className="h-2.5 w-2.5" /> {t.branch.name}
+                      </span>
+                    )}
                   </div>
                   {activeOrder && (
                     <div className="mb-2 rounded-md bg-slate-50 p-2 text-xs">
@@ -231,6 +248,34 @@ export function TablesManager() {
                   onChange={(e) => setEditing({ ...editing, capacity: parseInt(e.target.value) || 4 })}
                 />
               </div>
+              {branches.length > 0 && (
+                <div>
+                  <Label>Branch</Label>
+                  <Select
+                    value={editing.branchId || '__none__'}
+                    onValueChange={(v) =>
+                      setEditing({ ...editing, branchId: v === '__none__' ? '' : v })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">
+                        No branch (restaurant-wide)
+                      </SelectItem>
+                      {branches.map((b: any) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Orders placed at this table are counted towards the branch.
+                  </p>
+                </div>
+              )}
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"

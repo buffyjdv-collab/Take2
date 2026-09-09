@@ -8,6 +8,7 @@ import { OrdersManager } from './admin/orders-manager'
 import { MenuManager } from './admin/menu-manager'
 import { ModifierGroupsManager } from './admin/modifier-groups-manager'
 import { TablesManager } from './admin/tables-manager'
+import { BranchesManager } from './admin/branches-manager'
 import { ReportsManager } from './admin/reports-manager'
 import { SettingsManager } from './admin/settings-manager'
 import { StaffManager } from './admin/staff-manager'
@@ -106,6 +107,12 @@ export function AppShell({ serverSession }: AppShellProps) {
 
   const role = (session?.user as any)?.role as string
   const restaurantName = (session?.user as any)?.restaurantName as string | undefined
+  const branchName = (session?.user as any)?.branchName as string | undefined
+  // Only genuinely branch-scoped staff (manager/kitchen/waiter/cashier with a
+  // branch assignment) get the "Branch view" label — an owner's user record
+  // may reference a branch without being scoped to it.
+  const branchScoped =
+    !!branchName && role !== 'SUPER_ADMIN' && role !== 'RESTAURANT_OWNER'
   const userName = session?.user?.name
 
   // For mobile, sidebar is hidden behind a toggle
@@ -128,6 +135,7 @@ export function AppShell({ serverSession }: AppShellProps) {
           activeKey={hash}
           restaurantName={restaurantName}
           userName={userName}
+          branchName={branchScoped ? branchName : null}
           onNavigate={(key) => {
             window.location.hash = key
             setHash(key)
@@ -148,6 +156,7 @@ export function AppShell({ serverSession }: AppShellProps) {
               activeKey={hash}
               restaurantName={restaurantName}
               userName={userName}
+              branchName={branchScoped ? branchName : null}
               onNavigate={(key) => {
                 window.location.hash = key
                 setHash(key)
@@ -187,6 +196,7 @@ export function AppShell({ serverSession }: AppShellProps) {
           {hash === 'menu' && <MenuManager />}
           {hash === 'modifiers' && <ModifierGroupsManager />}
           {hash === 'tables' && <TablesManager />}
+          {hash === 'branches' && <BranchesManager />}
           {hash === 'kitchen' && <KitchenDisplay />}
           {hash === 'waiter' && <WaiterDashboard />}
           {hash === 'billing' && <BillingManager />}

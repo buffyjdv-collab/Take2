@@ -284,6 +284,44 @@ export function useAdminTables() {
   })
 }
 
+export interface BranchStats {
+  todayOrders: number
+  todayRevenue: number
+  weekOrders: number
+  weekRevenue: number
+  topItems: Array<{ id: string; name: string; quantity: number; revenue: number }>
+}
+
+export interface AdminBranch {
+  id: string
+  name: string
+  address: string
+  phone: string | null
+  active: boolean
+  createdAt: string
+  tableCount: number
+  users: Array<{ id: string; name: string; email: string; role: string; active: boolean }>
+  stats: BranchStats
+}
+
+export interface AdminBranchesData {
+  branches: AdminBranch[]
+  unassigned: BranchStats | null
+  totals: {
+    todayOrders: number
+    todayRevenue: number
+    weekOrders: number
+    weekRevenue: number
+  } | null
+}
+
+export function useAdminBranches() {
+  return useQuery({
+    queryKey: ['admin-branches'],
+    queryFn: () => api<AdminBranchesData>(`/api/admin/branches`),
+  })
+}
+
 export function useAdminStaff() {
   return useQuery({
     queryKey: ['admin-staff'],

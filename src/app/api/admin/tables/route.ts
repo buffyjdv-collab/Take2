@@ -5,6 +5,7 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  scopeBranchId,
   writeAudit,
   generateToken,
   enforcePlanLimit,
@@ -13,16 +14,35 @@ import { tableSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Validate that a branchId (if provided) belongs to the caller's restaurant.
+ * Returns a fail() response on mismatch, or null when OK.
+ */
+async function validateBranch(restaurantId: string, branchId?: string | null) {
+  if (!branchId) return null
+  const branch = await db.branch.findUnique({ where: { id: branchId } })
+  if (!branch || branch.restaurantId !== restaurantId) {
+    return fail('Invalid branch — it does not belong to your restaurant.', 422)
+  }
+  return null
+}
+
 // GET /api/admin/tables
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  // Branch-scoped staff only manage their own branch's tables.
+  const branchId = scopeBranchId(user)
   const tables = await db.table.findMany({
-    where: restaurantId ? { restaurantId } : {},
+    where: {
+      ...(restaurantId ? { restaurantId } : {}),
+      ...(branchId ? { branchId } : {}),
+    },
     orderBy: { number: 'asc' },
     include: {
+      branch: { select: { id: true, name: true } },
       _count: { select: { orders: true } },
       orders: {
         where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
@@ -64,6 +84,10 @@ export async function POST(req: NextRequest) {
   }
   const data = parsed.data
 
+  // Branch assignment must reference a branch of THIS restaurant.
+  const branchErr = await validateBranch(restaurantId, data.branchId)
+  if (branchErr) return branchErr
+
   // Uniqueness check on (restaurantId, number)
   const existing = await db.table.findUnique({
     where: { restaurantId_number: { restaurantId, number: data.number } },
@@ -77,7 +101,9 @@ export async function POST(req: NextRequest) {
   const table = await db.table.create({
     data: {
       restaurantId,
-      branchId: data.branchId || null,
+      // A branch-scoped manager always creates tables inside their own branch,
+      // even if the client omitted the field.
+      branchId: scopeBranchId(user) || data.branchId || null,
       number: data.number,
       label: data.label || null,
       capacity: data.capacity,

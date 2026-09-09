@@ -5,6 +5,8 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  scopeBranchId,
+  canActOnBranch,
   writeAudit,
 } from '@/lib/api-helpers'
 import { tableSchema } from '@/lib/validations'
@@ -30,6 +32,8 @@ export async function PATCH(
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   const table = await getTableOr404(id, restaurantId)
   if (!table) return fail('Table not found.', 404)
+  // Branch-scoped staff can only touch tables of their own branch.
+  if (!canActOnBranch(user, table.branchId)) return fail('Table not found.', 404)
 
   let body: unknown
   try {
@@ -42,6 +46,19 @@ export async function PATCH(
     return fail(parsed.error.issues[0]?.message || 'Invalid input.', 422)
   }
   const data = parsed.data
+
+  // Branch re-assignment must reference a branch of THIS restaurant, and a
+  // branch-scoped manager cannot move a table out of their branch.
+  if (data.branchId !== undefined) {
+    const targetBranchId = scopeBranchId(user) || data.branchId || null
+    if (targetBranchId) {
+      const branch = await db.branch.findUnique({ where: { id: targetBranchId } })
+      if (!branch || branch.restaurantId !== table.restaurantId) {
+        return fail('Invalid branch — it does not belong to your restaurant.', 422)
+      }
+    }
+    data.branchId = targetBranchId
+  }
 
   // If number changed, ensure uniqueness
   if (data.number && data.number !== table.number) {
@@ -82,6 +99,8 @@ export async function DELETE(
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   const table = await getTableOr404(id, restaurantId)
   if (!table) return fail('Table not found.', 404)
+  // Branch-scoped staff can only delete tables of their own branch.
+  if (!canActOnBranch(user, table.branchId)) return fail('Table not found.', 404)
   await db.table.delete({ where: { id } })
   writeAudit(user, 'DELETE', 'TABLE', id, { number: table.number })
   return ok({ deleted: true })

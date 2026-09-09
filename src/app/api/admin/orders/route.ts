@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, ok, fail, scopeRestaurantId } from '@/lib/api-helpers'
+import { requirePermission, ok, fail, scopeRestaurantId, scopeBranchId } from '@/lib/api-helpers'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +12,9 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams
   const restaurantId = scopeRestaurantId(user, sp.get('restaurantId'))
+  // Branch-scoped staff (e.g. a branch manager) only see their own branch's
+  // orders — kitchen display, waiter and billing all read through this route.
+  const branchId = scopeBranchId(user)
   const status = sp.get('status')
   const paymentStatus = sp.get('paymentStatus')
   const tableId = sp.get('tableId')
@@ -32,6 +35,7 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {}
   if (restaurantId) where.restaurantId = restaurantId
+  if (branchId) where.branchId = branchId
   if (status) {
     // Support comma-separated statuses (e.g. ?status=ACCEPTED,PREPARING) so
     // views like the Kitchen Display "Preparing" column can show orders in
@@ -62,6 +66,7 @@ export async function GET(req: NextRequest) {
       take: pageSize,
       include: {
         table: { select: { number: true, label: true } },
+        branch: { select: { id: true, name: true } },
         items: { select: { id: true, quantity: true, menuItemName: true } },
         _count: { select: { items: true } },
       },

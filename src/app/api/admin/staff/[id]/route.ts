@@ -51,6 +51,14 @@ export async function PATCH(
   }
   const data = parsed.data
 
+  // A branchId (if provided) must reference a branch of the caller's restaurant.
+  if (data.branchId) {
+    const branch = await db.branch.findUnique({ where: { id: data.branchId } })
+    if (!branch || (restaurantId && branch.restaurantId !== restaurantId)) {
+      return fail('Invalid branch — it does not belong to your restaurant.', 422)
+    }
+  }
+
   // Role change permission
   if (data.role && data.role !== target.role) {
     if (data.role === 'SUPER_ADMIN' && user.role !== 'SUPER_ADMIN') {

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, ok, fail, scopeRestaurantId } from '@/lib/api-helpers'
+import { requirePermission, ok, fail, scopeRestaurantId, scopeBranchId } from '@/lib/api-helpers'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +14,9 @@ export async function GET(req: NextRequest) {
     user,
     req.nextUrl.searchParams.get('restaurantId'),
   )
+  // Branch-scoped staff (e.g. a branch manager) see only their branch's numbers.
+  const branchId = scopeBranchId(user)
+  const branchFilter = branchId ? { branchId } : {}
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -22,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   const orderWhere = {
     ...(restaurantId ? { restaurantId } : {}),
+    ...branchFilter,
     placedAt: { gte: today, lt: tomorrow },
     status: { not: 'CANCELLED' },
   }
@@ -50,6 +54,7 @@ export async function GET(req: NextRequest) {
       by: ['status'],
       where: {
         ...(restaurantId ? { restaurantId } : {}),
+        ...branchFilter,
         placedAt: { gte: today, lt: tomorrow },
       },
       _count: true,
@@ -57,6 +62,7 @@ export async function GET(req: NextRequest) {
     db.order.findMany({
       where: {
         ...(restaurantId ? { restaurantId } : {}),
+        ...branchFilter,
         placedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
         status: { not: 'CANCELLED' },
       },
@@ -66,6 +72,7 @@ export async function GET(req: NextRequest) {
       where: {
         order: {
           ...(restaurantId ? { restaurantId } : {}),
+          ...branchFilter,
           placedAt: { gte: today, lt: tomorrow },
           status: { not: 'CANCELLED' },
         },

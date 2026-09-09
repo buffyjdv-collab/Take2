@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, fail, scopeRestaurantId } from '@/lib/api-helpers'
+import { requirePermission, fail, scopeRestaurantId, scopeBranchId } from '@/lib/api-helpers'
 import { resolveDateRange } from '@/lib/date-range'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +20,8 @@ export async function GET(req: NextRequest) {
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  // Branch-scoped staff (branch managers) see only their branch's numbers.
+  const branchId = scopeBranchId(user)
 
   const sp = req.nextUrl.searchParams
   const range = sp.get('range') || '7d'
@@ -35,6 +37,7 @@ export async function GET(req: NextRequest) {
   const orders = await db.order.findMany({
     where: {
       ...(restaurantId ? { restaurantId } : {}),
+      ...(branchId ? { branchId } : {}),
       placedAt: { gte: from, lte: to },
     },
     orderBy: { placedAt: 'asc' },

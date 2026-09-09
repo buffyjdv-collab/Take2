@@ -241,6 +241,14 @@ export const tableSchema = z.object({
   branchId: z.string().optional().nullable(),
 })
 
+// Admin: branch (restaurant location managed by a branch manager)
+export const branchSchema = z.object({
+  name: z.string().min(1, 'Branch name is required.').max(80),
+  address: z.string().min(1, 'Branch address is required.').max(300),
+  phone: z.string().max(20).optional().nullable(),
+  active: z.boolean().optional(),
+})
+
 // Admin: staff
 export const ALL_ROLES = [
   'SUPER_ADMIN',

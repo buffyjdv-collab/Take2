@@ -95,6 +95,14 @@ export async function POST(req: NextRequest) {
     return fail('Restaurant is required for this role.', 400)
   }
 
+  // A branchId (if provided) must reference a branch of the target restaurant.
+  if (data.branchId) {
+    const branch = await db.branch.findUnique({ where: { id: data.branchId } })
+    if (!branch || (finalRestaurantId && branch.restaurantId !== finalRestaurantId)) {
+      return fail('Invalid branch — it does not belong to your restaurant.', 422)
+    }
+  }
+
   // Plan limit enforcement (skip for SUPER_ADMIN creation — platform-level)
   if (data.role !== 'SUPER_ADMIN' && finalRestaurantId) {
     const limitErr = await enforcePlanLimit(finalRestaurantId, 'maxStaff')

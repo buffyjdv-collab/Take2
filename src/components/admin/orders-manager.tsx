@@ -162,7 +162,14 @@ export function OrdersManager() {
                     onClick={() => setSelectedId(o.id)}
                   >
                     <td className="p-3 font-medium">{o.orderNumber}</td>
-                    <td className="p-3">{o.table?.number}</td>
+                    <td className="p-3">
+                      {o.table?.number}
+                      {o.branch?.name && (
+                        <span className="ml-1.5 rounded-full bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+                          {o.branch.name}
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 text-muted-foreground">
                       {new Date(o.placedAt).toLocaleTimeString('en-IN', {
                         hour: '2-digit',
@@ -288,7 +295,7 @@ function OrderDetailSheet({
             </SheetTitle>
             <SheetDescription>
               {order
-                ? `Table ${order.table?.number} · placed ${new Date(order.placedAt).toLocaleString('en-IN')}`
+                ? `Table ${order.table?.number}${order.branch?.name ? ` · ${order.branch.name}` : ''} · placed ${new Date(order.placedAt).toLocaleString('en-IN')}`
                 : 'Loading…'}
             </SheetDescription>
           </SheetHeader>

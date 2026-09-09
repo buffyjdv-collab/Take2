@@ -12,6 +12,7 @@ export interface SessionUser {
   branchId?: string | null
   restaurantName?: string | null
   restaurantSlug?: string | null
+  branchName?: string | null
 }
 
 export async function getSessionUser(): Promise<SessionUser | null> {
@@ -63,6 +64,34 @@ export function scopeRestaurantId(
     return override || null
   }
   return user.restaurantId || null
+}
+
+/**
+ * Branch scope for branch-assigned staff (MANAGER / KITCHEN_STAFF / WAITER /
+ * CASHIER whose account is attached to a single branch). Returns the user's
+ * branchId, or null when the caller should see the whole restaurant
+ * (SUPER_ADMIN / RESTAURANT_OWNER, or staff not assigned to any branch).
+ *
+ * Used by the admin list/report APIs to filter data down to the caller's
+ * branch so a branch manager only monitors & manages their own location.
+ */
+export function scopeBranchId(user: SessionUser): string | null {
+  if (user.role === 'SUPER_ADMIN' || user.role === 'RESTAURANT_OWNER') {
+    return null
+  }
+  return user.branchId || null
+}
+
+/**
+ * Guard helper for single-entity action routes (status change, cash
+ * collection, …). Returns true when the caller is allowed to act on an
+ * entity that lives in `entityBranchId` — false when a branch-scoped staff
+ * member tries to touch another branch's entity.
+ */
+export function canActOnBranch(user: SessionUser, entityBranchId: string | null): boolean {
+  const branchId = scopeBranchId(user)
+  if (!branchId) return true
+  return entityBranchId === branchId
 }
 
 export async function requirePermission(permission: string) {

@@ -5,6 +5,7 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  canActOnBranch,
   writeAudit,
 } from '@/lib/api-helpers'
 import { updateOrderStatusSchema } from '@/lib/validations'
@@ -43,6 +44,10 @@ export async function PATCH(
 
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   if (restaurantId && order.restaurantId !== restaurantId) {
+    return fail('Order not found.', 404)
+  }
+  // Branch-scoped staff may only act on their own branch's orders.
+  if (!canActOnBranch(user, order.branchId)) {
     return fail('Order not found.', 404)
   }
 

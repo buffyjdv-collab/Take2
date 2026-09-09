@@ -63,6 +63,7 @@ export const NAV: NavItem[] = [
   { key: 'menu', label: 'Menu', icon: UtensilsCrossed, permission: 'menu.update', group: 'restaurant' },
   { key: 'modifiers', label: 'Modifiers', icon: UtensilsCrossed, permission: 'menu.update', group: 'restaurant' },
   { key: 'tables', label: 'Tables & QR', icon: Table2, permission: 'tables.manage', group: 'restaurant' },
+  { key: 'branches', label: 'Branches', icon: Building2, permission: 'branches.manage', group: 'restaurant' },
   { key: 'kitchen', label: 'Kitchen', icon: ChefHat, permission: 'kitchen.view', group: 'restaurant' },
   { key: 'waiter', label: 'Waiter', icon: BellRing, permission: 'waiter.view', group: 'restaurant' },
   { key: 'billing', label: 'Billing', icon: Receipt, permission: 'billing.manage', group: 'restaurant' },
@@ -76,12 +77,14 @@ export function Sidebar({
   activeKey,
   restaurantName,
   userName,
+  branchName,
   onNavigate,
 }: {
   role: string
   activeKey: string
   restaurantName?: string | null
   userName?: string | null
+  branchName?: string | null
   onNavigate?: (key: string) => void
 }) {
   // The server-side render uses the static fallback (hasModuleAccess) for the
@@ -149,6 +152,8 @@ export function Sidebar({
           <p className="text-[10px] text-muted-foreground">
             {role === 'SUPER_ADMIN' && isPlatformView
               ? 'Super Admin Console'
+              : branchName
+              ? `${branchName} · Branch view`
               : 'Restaurant OS'}
           </p>
         </div>
