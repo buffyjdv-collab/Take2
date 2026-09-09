@@ -30,9 +30,12 @@ interface Props {
    *  order — same name & mobile). */
   initialCustomerName?: string
   initialCustomerPhone?: string
+  /** Table QR token — passed through to CheckoutSheet (needed to create the
+   *  order under the /t/<token> scan route). */
+  tableToken?: string
 }
 
-export function CartDrawer({ open, onOpenChange, restaurant, onCheckout, initialCustomerName, initialCustomerPhone }: Props) {
+export function CartDrawer({ open, onOpenChange, restaurant, onCheckout, initialCustomerName, initialCustomerPhone, tableToken }: Props) {
   const items = useCustomerCart((s) => s.items)
   const updateQuantity = useCustomerCart((s) => s.updateQuantity)
   const removeItem = useCustomerCart((s) => s.removeItem)
@@ -212,6 +215,7 @@ export function CartDrawer({ open, onOpenChange, restaurant, onCheckout, initial
         onCheckoutComplete={handleCheckoutComplete}
         initialCustomerName={initialCustomerName}
         initialCustomerPhone={initialCustomerPhone}
+        tableToken={tableToken}
       />
     </>
   )

@@ -18,10 +18,14 @@ export function BillView({
   orderId,
   restaurant,
   onBackToMenu,
+  tableToken,
 }: {
   orderId: string
   restaurant: RestaurantInfo
   onBackToMenu: () => void
+  /** Table QR token — passed through to CheckoutSheet for the UPI-return
+   *  sessionStorage key under the /t/<token> scan route. */
+  tableToken?: string
 }) {
   const qc = useQueryClient()
   const { data: order, isLoading } = useCustomerOrder(orderId)
@@ -201,6 +205,7 @@ export function BillView({
         items={[]}
         existingOrderId={order.id}
         skipCustomerDetails
+        tableToken={tableToken}
         onCheckoutComplete={() => {
           setCheckoutOpen(false)
           qc.invalidateQueries({ queryKey: ['customer-order', orderId] })

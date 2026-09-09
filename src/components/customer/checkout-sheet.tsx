@@ -96,6 +96,11 @@ interface Props {
   initialCustomerName?: string
   /** Optional: pre-fill the customer-details step with a phone number. */
   initialCustomerPhone?: string
+  /** Table QR token. Needed to create the order and to key the UPI-return
+   *  sessionStorage entry. Under the /t/<token> scan route the token is a PATH
+   *  segment (not ?table= in the query string), so it MUST be passed in as a
+   *  prop by the parent; the ?table= query param is kept as a legacy fallback. */
+  tableToken?: string
 }
 
 type Step = 'details' | 'method' | 'upi_launch' | 'qr' | 'processing' | 'success' | 'error'
@@ -124,6 +129,7 @@ export function CheckoutSheet({
   hiddenMethodIds = [],
   initialCustomerName = '',
   initialCustomerPhone = '',
+  tableToken: tableTokenProp,
 }: Props) {
   const placeOrder = usePlaceOrder()
   const initiate = useInitiatePayment()
@@ -191,6 +197,11 @@ export function CheckoutSheet({
     [restaurant.paymentMethods],
   )
 
+  /** Table QR token — resolved once; prop wins, legacy ?table= query param is
+   *  the fallback for callers that have not been migrated yet. */
+  const tableToken =
+    tableTokenProp || new URLSearchParams(window.location.search).get('table') || ''
+
   const nameValid = customerName.trim().length >= 2
   const digits = customerPhone.replace(/[^\d]/g, '')
   const phoneValid = digits.length >= 7 && digits.length <= 15
@@ -215,7 +226,7 @@ export function CheckoutSheet({
     sessionStorage.setItem('last-idem-key', idempotencyKey)
 
     const body = {
-      tableToken: new URLSearchParams(window.location.search).get('table') || '',
+      tableToken,
       items: items.map((i: CartItem) => ({
         menuItemId: i.menuItemId,
         variantId: i.variantId,
@@ -286,7 +297,6 @@ export function CheckoutSheet({
       // UPI: open the deep-link (auto-launch customer's UPI app), then wait
       // for them to return + verify.
       if (t === 'UPI' && init.upiDeepLink) {
-        const tableToken = new URLSearchParams(window.location.search).get('table') || ''
         sessionStorage.setItem(`order-${tableToken}`, orderId)
         sessionStorage.setItem('returning-from-upi', '1')
         try {

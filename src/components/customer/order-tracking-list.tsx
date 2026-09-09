@@ -283,6 +283,7 @@ export function OrderTrackingList({
           }}
           items={[]}
           existingOrderId={payOrderId}
+          tableToken={tableToken}
           skipCustomerDetails
           onCheckoutComplete={() => {
             setPayOrderId(null)

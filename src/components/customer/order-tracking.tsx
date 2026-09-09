@@ -89,6 +89,7 @@ export function OrderTracking({
   onBackToMenu,
   onProceedToBill,
   onOrderMore,
+  tableToken,
 }: {
   orderId: string
   restaurant?: RestaurantInfo
@@ -98,6 +99,9 @@ export function OrderTracking({
    *  the current one has been accepted. Receives the customer name & phone
    *  snapshot from the accepted order so the new order can reuse them. */
   onOrderMore?: (customerName: string, customerPhone: string) => void
+  /** Table QR token — passed through to CheckoutSheet for the UPI-return
+   *  sessionStorage key under the /t/<token> scan route. */
+  tableToken?: string
 }) {
   const qc = useQueryClient()
   const { data: order, isLoading } = useCustomerOrder(orderId)
@@ -628,6 +632,7 @@ export function OrderTracking({
         items={[]}
         existingOrderId={order.id}
         skipCustomerDetails
+        tableToken={tableToken}
         // Hide the pay-on-delivery method(s) the customer already chose at
         // order placement — they shouldn't be asked to pick it again.
         hiddenMethodIds={hiddenMethodIds}

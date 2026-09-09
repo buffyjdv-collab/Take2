@@ -233,6 +233,7 @@ export function CustomerApp({ token }: { token: string }) {
         <OrderTracking
           orderId={placedOrderId}
           restaurant={restaurant}
+          tableToken={token}
           onBackToMenu={() => {
             setView('menu')
             window.location.hash = ''
@@ -263,6 +264,7 @@ export function CustomerApp({ token }: { token: string }) {
         <BillView
           orderId={placedOrderId}
           restaurant={restaurant}
+          tableToken={token}
           onBackToMenu={() => {
             sessionStorage.removeItem(`order-${token}`)
             setPlacedOrderId(null)
@@ -283,6 +285,7 @@ export function CustomerApp({ token }: { token: string }) {
         open={cartOpen}
         onOpenChange={setCartOpen}
         restaurant={restaurant}
+        tableToken={token}
         initialCustomerName={prefillCustomer?.name}
         initialCustomerPhone={prefillCustomer?.phone}
         onCheckout={(orderId, phone) => {
@@ -318,7 +321,7 @@ export function CustomerApp({ token }: { token: string }) {
         </motion.button>
       )}
 
-      <FloatingCartButton onClick={() => setCartOpen(true)} />
+      <FloatingCartButton tableToken={token} onClick={() => setCartOpen(true)} />
 
       {/* Mobile bottom tab bar — hidden on md+ where the top header + scroll menu suffice. */}
       <CustomerBottomNav

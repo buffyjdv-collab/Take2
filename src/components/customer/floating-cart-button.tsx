@@ -5,10 +5,22 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useCustomerCart } from '@/stores/customer-cart'
 import { useCustomerMenu } from '@/hooks/api'
 
-export function FloatingCartButton({ onClick }: { onClick: () => void }) {
+export function FloatingCartButton({
+  onClick,
+  tableToken: tableTokenProp,
+}: {
+  onClick: () => void
+  /** Table QR token. Under the /t/<token> scan route the token is a PATH
+   *  segment, so it must be passed in as a prop — reading ?table= from the
+   *  query string there yields null, which broke the item count / total
+   *  display ("0 undefined ITEMS ₹0"). The legacy query param stays as a
+   *  fallback for old entry points. */
+  tableToken?: string
+}) {
   const items = useCustomerCart((s) => s.items)
   const totals = useCustomerCart((s) => s.totals)
-  const table = new URLSearchParams(window.location.search).get('table')
+  const table =
+    tableTokenProp || new URLSearchParams(window.location.search).get('table')
   const { data } = useCustomerMenu(table)
   const r = data?.restaurant
   const t = r ? totals(r.taxRate, r.serviceChargeRate) : null
