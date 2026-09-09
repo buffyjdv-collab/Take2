@@ -825,8 +825,8 @@ async function main() {
   console.log('  Kitchen Staff  : chef1@spicegarden.in')
   console.log('  Waiter         : waiter1@spicegarden.in')
   console.log('  Cashier        : cashier@spicegarden.in')
-  console.log('\nSample customer scan URL:')
-  console.log('  /?table=sg-1-xxxxxxxxxx  (use any QR token from DB)')
+  console.log('\nSample customer scan URL (auto-opens the menu):')
+  console.log('  /t/sg-1-xxxxxxxxxx  (use any QR token from DB)')
 }
 
 main()

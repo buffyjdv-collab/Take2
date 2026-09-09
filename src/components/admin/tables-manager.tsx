@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { useAdminTables, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users } from 'lucide-react'
+import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users, ExternalLink, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { LoadingSpinner, EmptyState, ButtonWithLoading } from '@/components/restaurant/loading-states'
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
@@ -44,8 +44,9 @@ export function TablesManager() {
   const [editing, setEditing] = useState<any | null>(null)
   const [open, setOpen] = useState(false)
   const [qrTable, setQrTable] = useState<any | null>(null)
-  const [qrData, setQrData] = useState<string | null>(null)
+  const [qrInfo, setQrInfo] = useState<{ dataUrl: string; url: string } | null>(null)
   const [regenerating, setRegenerating] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const handleNew = () => {
     setEditing({ number: '', label: '', capacity: 4, active: true })
@@ -87,10 +88,11 @@ export function TablesManager() {
 
   const handleViewQr = async (t: any) => {
     setQrTable(t)
-    setQrData(null)
+    setQrInfo(null)
+    setCopied(false)
     try {
       const res = await api<any>(`/api/admin/tables/${t.id}/qr?format=dataurl`)
-      setQrData(res.dataUrl)
+      setQrInfo({ dataUrl: res.dataUrl, url: res.url })
     } catch (err: any) {
       toast.error(err.message || 'Failed to load QR')
     }
@@ -105,7 +107,7 @@ export function TablesManager() {
       toast.success('QR token regenerated — old QR codes no longer work')
       // Re-fetch data URL
       const r2 = await api<any>(`/api/admin/tables/${qrTable.id}/qr?format=dataurl`)
-      setQrData(r2.dataUrl)
+      setQrInfo({ dataUrl: r2.dataUrl, url: r2.url })
     } catch (err: any) {
       toast.error(err.message || 'Failed')
     } finally {
@@ -278,9 +280,9 @@ export function TablesManager() {
           </SheetHeader>
           <div className="flex flex-col items-center gap-4 px-4 pb-8">
             <div className="rounded-xl border-2 border-slate-200 bg-white p-4">
-              {qrData ? (
+              {qrInfo ? (
                  
-                <img src={qrData} alt="QR code" className="h-56 w-56" />
+                <img src={qrInfo.dataUrl} alt="QR code" className="h-56 w-56" />
               ) : (
                 <div className="flex h-56 w-56 items-center justify-center">
                   <LoadingSpinner size="lg" />
@@ -288,19 +290,52 @@ export function TablesManager() {
               )}
             </div>
             <p className="text-center text-xs text-muted-foreground">
-              Scans open:{' '}
-              <code className="rounded bg-slate-100 px-1 py-0.5">
-                /?table={qrTable?.qrCodeToken?.slice(0, 14)}…
-              </code>
+              Scanning this QR auto-opens the menu at:
             </p>
+            <code className="max-w-full break-all rounded bg-slate-100 px-2 py-1 text-center text-[11px] text-slate-600">
+              {qrInfo?.url || '…'}
+            </code>
+            {/* Primary actions — open the exact URL customers get on scan,
+                or copy it to send via WhatsApp / print on a table card. */}
+            <div className="grid w-full grid-cols-2 gap-2">
+              <Button
+                disabled={!qrInfo}
+                className="bg-orange-600 text-white hover:bg-orange-700"
+                onClick={() => qrInfo && window.open(qrInfo.url, '_blank', 'noopener')}
+              >
+                <ExternalLink className="mr-1 h-4 w-4" /> Test scan
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!qrInfo}
+                onClick={async () => {
+                  if (!qrInfo) return
+                  try {
+                    await navigator.clipboard.writeText(qrInfo.url)
+                    setCopied(true)
+                    toast.success('Menu link copied')
+                    setTimeout(() => setCopied(false), 2000)
+                  } catch {
+                    toast.error('Copy failed — long-press the link to copy')
+                  }
+                }}
+              >
+                {copied ? (
+                  <Check className="mr-1 h-4 w-4 text-green-600" />
+                ) : (
+                  <Copy className="mr-1 h-4 w-4" />
+                )}
+                {copied ? 'Copied' : 'Copy link'}
+              </Button>
+            </div>
             <div className="grid w-full grid-cols-3 gap-2">
               <Button
                 variant="outline"
-                disabled={!qrData}
+                disabled={!qrInfo}
                 onClick={() => {
-                  if (!qrData) return
+                  if (!qrInfo) return
                   const a = document.createElement('a')
-                  a.href = qrData
+                  a.href = qrInfo.dataUrl
                   a.download = `qr-table-${qrTable?.number}.png`
                   a.click()
                 }}
@@ -309,13 +344,13 @@ export function TablesManager() {
               </Button>
               <Button
                 variant="outline"
-                disabled={!qrData}
+                disabled={!qrInfo}
                 onClick={() => {
-                  if (!qrData) return
+                  if (!qrInfo) return
                   const w = window.open('', '_blank')
                   if (w) {
                     w.document.write(
-                      `<img src="${qrData}" style="width:300px"/><script>window.print()</script>`,
+                      `<img src="${qrInfo.dataUrl}" style="width:300px"/><script>window.print()</script>`,
                     )
                   }
                 }}

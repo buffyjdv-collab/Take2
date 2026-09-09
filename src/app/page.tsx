@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth'
+import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
-import { CustomerApp } from '@/components/customer/customer-app'
 import { LandingPage } from '@/components/landing-page'
 import { AppShell } from '@/components/app-shell'
 
@@ -12,9 +12,12 @@ export default async function Home({ searchParams }: HomePageProps) {
   const sp = await searchParams
   const tableToken = sp.table
 
-  // Customer flow — no auth required
+  // Customer QR flow — no auth required. Redirect legacy `/ ?table=<token>`
+  // URLs (printed on older QR cards) to the canonical short scan route
+  // /t/<token>, which auto-opens the menu. This keeps every already-printed
+  // QR code working while giving customers one clean, shareable URL.
   if (tableToken) {
-    return <CustomerApp token={tableToken} />
+    redirect(`/t/${encodeURIComponent(tableToken)}`)
   }
 
   // Wrap in try/catch — a stale/invalid JWT cookie should never crash the page.
