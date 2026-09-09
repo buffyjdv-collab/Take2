@@ -187,7 +187,12 @@ export const modifierGroupSchema = z.object({
 //   - empty string
 //   - null (coerced to '' — happens when loading an item with no image from DB)
 //   - a public URL (https://…)
-//   - a data URL (data:image/...;base64,…) uploaded via /api/admin/upload
+//   - a site-relative path (e.g. /uploads/1738-abc.png) returned by
+//     /api/admin/upload — the file is written to disk and served by
+//     src/app/uploads/[...path]/route.ts or static /public/uploads
+//   - a data URL (data:image/...;base64,…) — accepted for legacy rows
+const SITE_RELATIVE_PATH = /^\/(?!\/)[^\s]+$/
+
 export const menuItemImageSchema = z
   .union([z.string(), z.null()])
   .transform((v) => (v == null ? '' : v))
@@ -199,8 +204,9 @@ export const menuItemImageSchema = z
         (v) =>
           v === '' ||
           /^https?:\/\//i.test(v) ||
+          SITE_RELATIVE_PATH.test(v) ||
           /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(v),
-        'Image must be a URL or a data URL',
+        'Image must be a URL, an uploaded path, or a data URL',
       ),
   )
   .optional()
@@ -290,12 +296,25 @@ export const settingsSchema = z.object({
   email: z
     .union([z.string(), z.null()])
     .transform((v) => (v == null ? '' : v))
-    .refine((v) => v === '' || z.string().email().safeParse(v).success, 'Invalid email'),
+    .refine((v) => v === '' || z.string().email().safeParse(v).success, 'Invalid email')
+    // .optional() is REQUIRED: the settings PATCH route performs partial
+    // updates (undefined = "leave unchanged"). Without it, any PATCH that
+    // omits email (e.g. a logo-only save) 422s with "Invalid input".
+    .optional(),
   website: nullableString,
   logo: z
     .union([z.string(), z.null()])
     .transform((v) => (v == null ? '' : v))
-    .refine((v) => v === '' || z.string().url().safeParse(v).success, 'Invalid URL'),
+    .refine(
+      (v) =>
+        v === '' ||
+        /^https?:\/\//i.test(v) || // absolute http(s) URL
+        SITE_RELATIVE_PATH.test(v) || // /uploads/… returned by /api/admin/upload
+        /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(v), // legacy rows
+      'Logo must be a URL or an uploaded path',
+    )
+    // .optional() — same partial-PATCH requirement as email above.
+    .optional(),
   gstNumber: nullableString,
   panNumber: nullableString,
   taxRate: z.number().min(0).max(1).optional(),
