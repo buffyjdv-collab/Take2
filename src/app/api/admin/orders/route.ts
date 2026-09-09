@@ -33,7 +33,14 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = {}
   if (restaurantId) where.restaurantId = restaurantId
   if (status) {
-    where.status = status
+    // Support comma-separated statuses (e.g. ?status=ACCEPTED,PREPARING) so
+    // views like the Kitchen Display "Preparing" column can show orders in
+    // more than one status with a single request.
+    const statuses = status
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    where.status = statuses.length > 1 ? { in: statuses } : statuses[0]
   } else if (!includePendingPayment) {
     // Hide PENDING_PAYMENT orders unless explicitly requested
     where.status = { not: 'PENDING_PAYMENT' }

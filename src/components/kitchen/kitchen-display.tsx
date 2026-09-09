@@ -1,32 +1,63 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { VegBadge } from '@/components/restaurant/veg-badge'
-import { LoadingSpinner, EmptyState } from '@/components/restaurant/loading-states'
-import { useAdminOrders, useUpdateOrderStatus, api } from '@/hooks/api'
+import { LoadingSpinner } from '@/components/restaurant/loading-states'
+import { useAdminOrders, useUpdateOrderStatus } from '@/hooks/api'
 import { useSocketEvent } from '@/hooks/use-socket'
 import { useQueryClient } from '@tanstack/react-query'
-import { ChefHat, Search, AlarmClock, CheckCircle2, Utensils } from 'lucide-react'
+import { OrderStatusBadge } from '@/components/restaurant/order-status-badge'
+import { ChefHat, Search, AlarmClock } from 'lucide-react'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
-const COLUMN_STATUS = {
-  NEW: ['NEW'],
-  PREPARING: ['ACCEPTED', 'PREPARING'],
-  READY: ['READY'],
+/**
+ * The action each order gets, based on its CURRENT status. The kitchen runs a
+ * 3-column pipeline (New → Preparing → Ready to serve), but the "Preparing"
+ * column intentionally holds BOTH newly-accepted orders (ACCEPTED) and ones
+ * already cooking (PREPARING) so nothing falls through the cracks:
+ *   NEW / ACCEPTED → "Start preparing" (→ PREPARING)
+ *   PREPARING      → "Mark ready"      (→ READY)
+ *   READY          → "Mark served"     (→ SERVED)
+ * The statuses sent here are all valid transitions enforced by the API.
+ */
+function actionFor(order: { status: string }): { label: string; target: string } | null {
+  switch (order.status) {
+    case 'NEW':
+    case 'ACCEPTED':
+      return { label: 'Start preparing', target: 'PREPARING' }
+    case 'PREPARING':
+      return { label: 'Mark ready', target: 'READY' }
+    case 'READY':
+      return { label: 'Mark served', target: 'SERVED' }
+    default:
+      return null
+  }
 }
 
 export function KitchenDisplay() {
   const qc = useQueryClient()
   const [filter, setFilter] = useState('')
-  const { data, isLoading, refetch } = useAdminOrders({ status: 'NEW' })
-  const { data: prep, refetch: refetchPrep } = useAdminOrders({ status: 'PREPARING' })
-  const { data: ready, refetch: refetchReady } = useAdminOrders({ status: 'READY' })
+  // The "Preparing" column fetches BOTH ACCEPTED and PREPARING orders so a
+  // freshly accepted order shows up immediately (previously it appeared in
+  // no column until someone pressed "Start preparing" in the Orders module).
+  const { data, isLoading } = useAdminOrders({ status: 'NEW' })
+  const { data: prep } = useAdminOrders({ status: 'ACCEPTED,PREPARING' })
+  const { data: ready } = useAdminOrders({ status: 'READY' })
   const updateStatus = useUpdateOrderStatus()
+
+  // Advance an order to the next step of the kitchen pipeline. The target
+  // status comes from actionFor() so the button always sends a valid transition.
+  const advance = (o: any) => {
+    const action = actionFor(o)
+    if (!action) return
+    updateStatus
+      .mutateAsync({ id: o.id, status: action.target })
+      .catch((e) => toast.error(e.message || 'Failed'))
+  }
 
   // Real-time — invalidate on any order event
   useSocketEvent('order:new', () => {
@@ -69,39 +100,21 @@ export function KitchenDisplay() {
           accent="text-blue-400"
           orders={newOrders}
           loading={isLoading}
-          actionLabel="Start preparing"
-          actionStatus="PREPARING"
-          onAction={(o) =>
-            updateStatus.mutateAsync({ id: o.id, status: 'PREPARING' }).catch((e) =>
-              toast.error(e.message || 'Failed'),
-            )
-          }
+          onAction={advance}
         />
         <KanbanColumn
           title="Preparing"
           accent="text-orange-400"
           orders={prepOrders}
           loading={false}
-          actionLabel="Mark ready"
-          actionStatus="READY"
-          onAction={(o) =>
-            updateStatus.mutateAsync({ id: o.id, status: 'READY' }).catch((e) =>
-              toast.error(e.message || 'Failed'),
-            )
-          }
+          onAction={advance}
         />
         <KanbanColumn
           title="Ready to serve"
           accent="text-green-400"
           orders={readyOrders}
           loading={false}
-          actionLabel="Mark served"
-          actionStatus="SERVED"
-          onAction={(o) =>
-            updateStatus.mutateAsync({ id: o.id, status: 'SERVED' }).catch((e) =>
-              toast.error(e.message || 'Failed'),
-            )
-          }
+          onAction={advance}
         />
       </div>
     </div>
@@ -113,16 +126,12 @@ function KanbanColumn({
   accent,
   orders,
   loading,
-  actionLabel,
-  actionStatus,
   onAction,
 }: {
   title: string
   accent: string
   orders: any[]
   loading: boolean
-  actionLabel: string
-  actionStatus: string
   onAction: (o: any) => void
 }) {
   return (
@@ -149,7 +158,7 @@ function KanbanColumn({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
               >
-                <KitchenOrderCard order={o} actionLabel={actionLabel} onAction={() => onAction(o)} />
+                <KitchenOrderCard order={o} onAction={() => onAction(o)} />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -161,13 +170,14 @@ function KanbanColumn({
 
 function KitchenOrderCard({
   order,
-  actionLabel,
   onAction,
 }: {
   order: any
-  actionLabel: string
   onAction: () => void
 }) {
+  // Per-order action — the Preparing column mixes ACCEPTED + PREPARING, so
+  // each card shows the button that is valid for ITS OWN current status.
+  const action = actionFor(order)
   const minutes = Math.floor(
     (Date.now() - new Date(order.placedAt).getTime()) / 60000,
   )
@@ -222,18 +232,23 @@ function KitchenOrderCard({
         ))}
       </div>
 
-      <Button
-        size="sm"
-        className={cn(
-          'mt-3 w-full',
-          actionLabel.includes('Start') && 'bg-orange-600 text-white hover:bg-orange-700',
-          actionLabel.includes('ready') && 'bg-green-600 text-white hover:bg-green-700',
-          actionLabel.includes('served') && 'bg-purple-600 text-white hover:bg-purple-700',
-        )}
-        onClick={onAction}
-      >
-        {actionLabel}
-      </Button>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <OrderStatusBadge status={order.status} />
+        {action ? (
+          <Button
+            size="sm"
+            className={cn(
+              'flex-1',
+              action.target === 'PREPARING' && 'bg-orange-600 text-white hover:bg-orange-700',
+              action.target === 'READY' && 'bg-green-600 text-white hover:bg-green-700',
+              action.target === 'SERVED' && 'bg-purple-600 text-white hover:bg-purple-700',
+            )}
+            onClick={onAction}
+          >
+            {action.label}
+          </Button>
+        ) : null}
+      </div>
     </div>
   )
 }

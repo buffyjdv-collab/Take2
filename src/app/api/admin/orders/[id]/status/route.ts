@@ -15,7 +15,9 @@ export const dynamic = 'force-dynamic'
 // PATCH /api/admin/orders/[id]/status
 const VALID_TRANSITIONS: Record<string, string[]> = {
   PENDING_PAYMENT: ['NEW', 'ACCEPTED', 'CANCELLED'],
-  NEW: ['ACCEPTED', 'CANCELLED'],
+  // NEW → PREPARING is allowed so the Kitchen Display's "Start preparing"
+  // action works on a fresh order in one step (accept + start cooking).
+  NEW: ['ACCEPTED', 'PREPARING', 'CANCELLED'],
   ACCEPTED: ['PREPARING', 'CANCELLED'],
   PREPARING: ['READY', 'CANCELLED'],
   READY: ['SERVED'],

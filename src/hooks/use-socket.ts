@@ -31,6 +31,14 @@ export function useSocket() {
 
 /**
  * Subscribe to a specific realtime event.
+ *
+ * NOTE on envelope shape: API routes publish via `publishRealtime()` which
+ * wraps the actual payload in `{ restaurantId, payload }`, and the realtime
+ * mini-service re-broadcasts that envelope as-is. Consumers (order tracking,
+ * app shell, …) only care about the inner payload — so we unwrap it here,
+ * centrally. Handlers therefore receive the real payload (e.g. `{ orderId,
+ * status, … }`) and NOT the envelope. If an event ever arrives without the
+ * envelope wrapper it is passed through unchanged.
  */
 export function useSocketEvent<T = unknown>(
   event: string,
@@ -41,7 +49,16 @@ export function useSocketEvent<T = unknown>(
 
   useEffect(() => {
     const s = getSocket()
-    const listener = (payload: T) => handlerRef.current(payload)
+    const listener = (arg: unknown) => {
+      const unwrapped =
+        arg &&
+        typeof arg === 'object' &&
+        'payload' in (arg as Record<string, unknown>) &&
+        (arg as Record<string, unknown>).payload !== undefined
+          ? (arg as Record<string, unknown>).payload
+          : arg
+      handlerRef.current(unwrapped as T)
+    }
     s.on(event, listener)
     return () => {
       s.off(event, listener)

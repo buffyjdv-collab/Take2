@@ -47,12 +47,11 @@ io.on('connection', (socket) => {
     event: string,
     envelope: RealtimeEnvelope,
   ) => {
-    const { restaurantId } = envelope
-    // Broadcast globally — clients filter by restaurantId
+    // Broadcast globally — clients filter by restaurantId.
+    // (No client currently joins restaurant rooms; the extra room-scoped
+    // emit used to deliver EVERY event TWICE to room members, double-firing
+    // customer toasts. Global-only keeps delivery exactly once.)
     io.emit(event, envelope)
-    if (restaurantId) {
-      io.to(`restaurant:${restaurantId}`).emit(event, envelope)
-    }
   }
 
   // Pass-through forwarding so API routes can emit and have the server rebroadcast
