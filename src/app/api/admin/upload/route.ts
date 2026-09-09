@@ -3,7 +3,7 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { requirePermission, ok, fail, getSessionUser } from '@/lib/api-helpers'
 import { hasPermission } from '@/lib/auth'
-import { getUploadDir, toPublicUrl } from '@/lib/uploads'
+import { getUploadDirCandidates, ensureDirWritable, toPublicUrl } from '@/lib/uploads'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +15,6 @@ const ACCEPTED_IMAGE_TYPES = [
   'image/svg+xml',
 ]
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
-const MAX_WRITE_RETRIES = 3
 
 /**
  * Resilient permission check for the upload route.
@@ -111,29 +110,13 @@ export async function POST(req: NextRequest) {
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`
     const safeName = unique.replace(/[^a-zA-Z0-9.\-]/g, '')
 
-    // 5. Resolve the upload directory.
-    //    Prefers the always-writable OSS mount (/home/z/my-project/upload)
-    //    over the volatile public/uploads overlay (which intermittently
-    //    flips to read-only / EROFS). Falls back automatically if the
-    //    preferred location isn't writable.
-    const uploadDir = getUploadDir()
-
-    // Ensure the directory exists (idempotent — won't throw if it exists).
-    try {
-      await mkdir(uploadDir, { recursive: true })
-    } catch (err: any) {
-      console.error('[upload] mkdir failed:', uploadDir, err?.code || err?.message || err)
-      return fail(
-        `Could not create the uploads directory (${err?.code || 'unknown error'}). Please contact support.`,
-        500,
-      )
-    }
-
-    // 6. Write the file to disk, retrying on transient failures.
-    //    Transient FS errors (EBUSY/EAGAIN/transient EACCES) are retried with
-    //    a tiny back-off. EROFS (read-only filesystem) is NOT retried — instead
-    //    we switch to the fallback directory (the always-writable OSS mount)
-    //    on the next attempt, so uploads never fail due to a read-only FS.
+    // 5. Write the file, walking DOWN the candidate list on hard failures.
+    //    Each candidate is probe-verified writable (ensureDirWritable does a
+    //    real canary write) before we attempt the actual file write. On
+    //    EROFS/EACCES/EPERM (filesystem flipped read-only) we MOVE ON to the
+    //    next candidate — including the OS-temp last resort — instead of
+    //    retrying the same dead directory like earlier versions did. Only
+    //    genuinely transient errors (EBUSY/EAGAIN/…) retry in place.
     let bytes: ArrayBuffer
     try {
       bytes = await file.arrayBuffer()
@@ -142,65 +125,50 @@ export async function POST(req: NextRequest) {
     }
     const buffer = Buffer.from(bytes)
 
+    const candidates = getUploadDirCandidates()
     let lastErr: any = null
-    let writeDir = uploadDir
-    for (let attempt = 1; attempt <= MAX_WRITE_RETRIES; attempt++) {
-      const fullPath = path.join(writeDir, safeName)
-      try {
-        await writeFile(fullPath, buffer)
-        lastErr = null
-        break
-      } catch (err: any) {
-        lastErr = err
-        const code = err?.code || ''
-        // EROFS = read-only filesystem — don't retry the SAME dir; switch to
-        // the fallback (OSS mount) which is always writable.
-        if (code === 'EROFS') {
-          console.warn('[upload] EROFS on', writeDir, '→ switching to fallback')
-          const fallback = path.join(process.cwd(), 'public', 'uploads')
-          // If we were already on public/uploads (EROFS), switch to the OSS mount
-          writeDir =
-            writeDir === fallback ? '/home/z/my-project/upload' : writeDir
-          // Forcibly re-resolve via getUploadDir which picks a writable dir
-          writeDir = getUploadDir()
-          try {
-            await mkdir(writeDir, { recursive: true })
-          } catch {
-            /* ignore — will retry the write */
+    let writeDir: string | null = null
+    outer: for (const dir of candidates) {
+      if (!ensureDirWritable(dir)) {
+        lastErr = { code: 'EROFS', message: `dir not writable: ${dir}` }
+        continue // dead candidate → next one
+      }
+      const fullPath = path.join(dir, safeName)
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          await writeFile(fullPath, buffer)
+          writeDir = dir
+          lastErr = null
+          break outer
+        } catch (err: any) {
+          lastErr = err
+          const code = err?.code || ''
+          // Read-only / permission wall → abandon this dir entirely.
+          if (code === 'EROFS' || code === 'EACCES' || code === 'EPERM') {
+            console.warn(`[upload] ${code} on ${dir} → trying next candidate`)
+            continue outer
           }
-          continue
-        }
-        // Transient FS errors worth retrying in place.
-        const transient =
-          code === 'EBUSY' ||
-          code === 'EAGAIN' ||
-          code === 'EDEADLK' ||
-          code === 'EACCES' ||
-          code === 'ENOENT' ||
-          code === 'EMFILE' ||
-          code === 'ENFILE'
-        console.warn(
-          `[upload] writeFile attempt ${attempt}/${MAX_WRITE_RETRIES} failed:`,
-          code || err?.message,
-          '→',
-          transient ? 'retrying' : 'giving up',
-        )
-        if (!transient || attempt === MAX_WRITE_RETRIES) break
-        await new Promise((r) => setTimeout(r, 50 * attempt))
-        if (code === 'ENOENT') {
-          try {
-            await mkdir(writeDir, { recursive: true })
-          } catch {
-            /* will retry the write anyway */
+          // Transient blip → one quick in-place retry (and mkdir in case
+          // the dir vanished underneath us).
+          if (attempt === 1) {
+            console.warn(`[upload] transient ${code || err?.message} on ${dir} → retrying`)
+            try {
+              await mkdir(dir, { recursive: true })
+            } catch {
+              /* the retry write will surface the real error */
+            }
+            await new Promise((r) => setTimeout(r, 50))
+            continue
           }
+          continue outer
         }
       }
     }
 
-    if (lastErr) {
+    if (lastErr || !writeDir) {
       const code = lastErr?.code || 'unknown'
       const msg = lastErr?.message || String(lastErr)
-      console.error('[upload] all write attempts failed:', writeDir, code, msg)
+      console.error('[upload] all write attempts failed:', code, msg)
       return fail(
         `Could not save the file to the server (write failed: ${code}). ` +
           `Please try again — if it keeps failing, refresh the page and retry.`,

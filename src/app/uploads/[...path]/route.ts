@@ -1,30 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import path from 'path'
-import { getUploadDir } from '@/lib/uploads'
+import { resolveStoredFile } from '@/lib/uploads'
 
 export const dynamic = 'force-dynamic'
 
 // GET /uploads/<...path>
 //
 // Serves uploaded files that are stored OUTSIDE the /public folder (e.g. in
-// the always-writable OSS mount at /home/z/my-project/upload). When a file
-// DOES exist in public/uploads, Next.js serves it statically and this route
-// is never hit. This route only fires for files that aren't in /public —
-// i.e. the ones written to the OSS mount by /api/admin/upload.
+// the persistent writable mount). When a file DOES exist in public/uploads,
+// Next.js serves it statically and this route is never hit.
 //
-// Security: rejects path traversal (..) and only serves files from the
-// resolved upload directory. Sets a 1-year cache for immutable assets.
+// Lookup goes through resolveStoredFile(), which searches EVERY candidate
+// upload directory (env UPLOAD_DIR → persistent mount → public/uploads →
+// OS temp). This matters because the write-time directory can differ from
+// the currently-preferred one after the overlay filesystem flips read-only —
+// resolving via a single "current" dir caused spurious 404s for files that
+// were in fact safely stored elsewhere.
+//
+// Security: rejects path traversal (..) and only serves files whose names
+// match the sanitized upload pattern.
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path: segments } = await params
 
-  // Build the filename from the path segments. Reject anything that tries
-  // to escape the upload directory (path traversal).
+  // Build the filename from the path segments and validate it up-front.
+  // Uploaded names are always sanitized to [a-zA-Z0-9.-]; anything else
+  // (including traversal attempts) is rejected before touching the disk.
   const filename = segments.map((s) => decodeURIComponent(s)).join('/')
+  const safeName = filename.replace(/[^a-zA-Z0-9.\-]/g, '')
   if (
+    !safeName ||
+    safeName !== filename ||
     filename.includes('..') ||
     filename.startsWith('/') ||
     path.isAbsolute(filename)
@@ -32,14 +41,12 @@ export async function GET(
     return new NextResponse('Not found', { status: 404 })
   }
 
-  const uploadDir = getUploadDir()
-  const fullPath = path.join(uploadDir, filename)
-
-  // Final safety: ensure the resolved path is still inside the upload dir.
-  const rel = path.relative(uploadDir, fullPath)
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  // Search every candidate upload directory for this file.
+  const storedPath = resolveStoredFile(safeName)
+  if (!storedPath) {
     return new NextResponse('Not found', { status: 404 })
   }
+  const fullPath = storedPath
 
   let bytes: Buffer
   try {

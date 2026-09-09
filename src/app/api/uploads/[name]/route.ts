@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFile, stat } from 'fs/promises'
-import path from 'path'
-import { existsSync } from 'fs'
+import { resolveStoredFile } from '@/lib/uploads'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/uploads/[name]
  *
- * Serves an uploaded file from the writable uploads directory.
- *
- * The uploads directory is resolved in this priority order:
- *   1. process.env.UPLOADS_DIR (explicit override)
- *   2. <project>/upload        — a persistent writable tmpfs mount in the
- *                                sandbox (survives overlay-FS read-only flips)
- *   3. <project>/public/uploads — fallback (Next.js serves this directly, but
- *                                it can flip read-only in the sandbox)
+ * Legacy serving route — kept so older logo/image URLs keep working.
+ * Delegates lookup to resolveStoredFile(), which searches EVERY candidate
+ * upload directory (env UPLOAD_DIR → persistent mount → public/uploads →
+ * OS temp), so files remain downloadable even when the write-time directory
+ * differs from the currently-preferred one (e.g. after an overlay-FS
+ * read-only flip).
  *
  * The route streams the file bytes with the correct Content-Type and a long
  * cache max-age (immutable — uploaded files are content-addressed by unique
@@ -31,17 +28,6 @@ const EXT_TO_MIME: Record<string, string> = {
   bin: 'application/octet-stream',
 }
 
-function resolveUploadsDir(): string {
-  if (process.env.UPLOADS_DIR) return process.env.UPLOADS_DIR
-  const projectRoot = process.cwd()
-  // Prefer the persistent tmpfs mount under <project>/upload (writable even
-  // when the overlay FS flips read-only).
-  const tmpfs = path.join(projectRoot, 'upload')
-  if (existsSync(tmpfs)) return tmpfs
-  // Fallback to public/uploads (served directly by Next.js otherwise).
-  return path.join(projectRoot, 'public', 'uploads')
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ name: string }> },
@@ -55,15 +41,12 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid filename.' }, { status: 400 })
   }
 
-  const uploadsDir = resolveUploadsDir()
-  const fullPath = path.join(uploadsDir, name)
-
-  // Re-verify the resolved path is still inside uploadsDir (defence-in-depth
-  // against any edge-case path tricks).
-  const normalized = path.normalize(fullPath)
-  if (!normalized.startsWith(path.normalize(uploadsDir) + path.sep) && normalized !== path.normalize(uploadsDir)) {
-    return NextResponse.json({ error: 'Invalid path.' }, { status: 400 })
+  // Search every candidate upload directory for this file.
+  const storedPath = resolveStoredFile(name)
+  if (!storedPath) {
+    return NextResponse.json({ error: 'File not found.' }, { status: 404 })
   }
+  const fullPath = storedPath
 
   try {
     await stat(fullPath)
