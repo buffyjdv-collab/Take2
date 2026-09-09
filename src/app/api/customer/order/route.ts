@@ -46,6 +46,11 @@ export async function POST(req: NextRequest) {
   })
   if (!table) return fail('Invalid or unknown QR code.', 404)
   if (!table.active) return fail('This table is currently inactive.', 410)
+  // Owner-approval workflow: tables created by a branch manager can only
+  // take orders once the restaurant owner has approved them.
+  if (table.approvalStatus !== 'APPROVED') {
+    return fail('This table is not open for orders yet. Please contact the staff.', 410)
+  }
 
   const restaurant = table.restaurant
   if (!restaurant) return fail('Restaurant not found.', 404)
@@ -67,17 +72,25 @@ export async function POST(req: NextRequest) {
   const menuItems = await db.menuItem.findMany({
     where: { id: { in: menuItemIds } },
     include: {
+      category: { select: { approvalStatus: true } },
       variants: true,
       modifierGroups: { include: { modifiers: true } },
     },
   })
   const menuItemMap = new Map(menuItems.map((m) => [m.id, m]))
 
-  // Verify all items belong to this restaurant
+  // Verify all items belong to this restaurant, are owner-approved, and are
+  // visible to THIS table's branch (shared or same-branch items only).
   for (const it of input.items) {
     const m = menuItemMap.get(it.menuItemId)
     if (!m || m.restaurantId !== restaurant.id) {
       return fail(`Item not found: ${it.menuItemId}`, 404)
+    }
+    if (m.approvalStatus !== 'APPROVED' || m.category.approvalStatus !== 'APPROVED') {
+      return fail(`Item unavailable: ${m.name}`, 409)
+    }
+    if (table.branchId && m.branchId && m.branchId !== table.branchId) {
+      return fail(`Item not available at this table: ${m.name}`, 409)
     }
     if (m.soldOut || !m.available) {
       return fail(`Item unavailable: ${m.name}`, 409)

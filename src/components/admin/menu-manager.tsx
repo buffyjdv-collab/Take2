@@ -27,15 +27,21 @@ import { VegBadge } from '@/components/restaurant/veg-badge'
 import { SpicyBadge } from '@/components/restaurant/spicy-badge'
 import { EmptyState, LoadingSpinner, ButtonWithLoading } from '@/components/restaurant/loading-states'
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
-import { useAdminCategories, useAdminMenuItems, useAdminModifierGroups, api } from '@/hooks/api'
+import { useAdminCategories, useAdminMenuItems, useAdminModifierGroups, useAdminBranches, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { Plus, Pencil, Trash2, Star, Flame, X, UtensilsCrossed, Upload, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { ApprovalBadge, BranchChip, ManagerApprovalHint } from './approval-badge'
 
 export function MenuManager() {
   const { data: categories, isLoading: catLoading } = useAdminCategories()
   const { data: items, isLoading: itemsLoading } = useAdminMenuItems()
+  const { data: session } = useSession()
+  const isManager = session?.user?.role === 'MANAGER'
+  const { data: branchData } = useAdminBranches()
+  const branches = branchData?.branches || []
   const qc = useQueryClient()
 
   const [activeCat, setActiveCat] = useState<string>('')
@@ -43,6 +49,7 @@ export function MenuManager() {
   const [editOpen, setEditOpen] = useState(false)
   const [newCatOpen, setNewCatOpen] = useState(false)
   const [newCatName, setNewCatName] = useState('')
+  const [newCatBranch, setNewCatBranch] = useState('shared')
   const [editCat, setEditCat] = useState<any | null>(null)
 
   const filteredItems = items?.filter((i: any) => i.categoryId === activeCat) || items
@@ -77,13 +84,19 @@ export function MenuManager() {
           method: 'PATCH',
           body: JSON.stringify(editingItem),
         })
-        toast.success('Item updated')
+        toast.success(
+          isManager
+            ? 'Item updated — resubmitted for owner approval'
+            : 'Item updated',
+        )
       } else {
         await api(`/api/admin/menu/items`, {
           method: 'POST',
           body: JSON.stringify(editingItem),
         })
-        toast.success('Item created')
+        toast.success(
+          isManager ? 'Item submitted — awaiting owner approval' : 'Item created',
+        )
       }
       qc.invalidateQueries({ queryKey: ['admin-menu-items'] })
       setEditOpen(false)
@@ -121,12 +134,21 @@ export function MenuManager() {
     try {
       await api(`/api/admin/menu/categories`, {
         method: 'POST',
-        body: JSON.stringify({ name: newCatName.trim() }),
+        body: JSON.stringify({
+          name: newCatName.trim(),
+          // Owner can pick a branch scope; managers always create in their
+          // own branch (the server overrides whatever is sent here).
+          branchId: newCatBranch === 'shared' ? null : newCatBranch,
+        }),
       })
       qc.invalidateQueries({ queryKey: ['admin-categories'] })
       setNewCatName('')
       setNewCatOpen(false)
-      toast.success('Category added')
+      toast.success(
+        isManager
+          ? 'Category submitted — awaiting owner approval'
+          : 'Category added',
+      )
     } catch (err: any) {
       toast.error(err.message || 'Failed')
     }
@@ -157,7 +179,15 @@ export function MenuManager() {
                 onClick={() => setActiveCat(c.id)}
               >
                 {c.icon && <span>{c.icon}</span>}
-                <span className="flex-1 font-medium">{c.name}</span>
+                <span className="flex-1 truncate font-medium" title={c.name}>
+                  {c.name}
+                </span>
+                {c.approvalStatus === 'PENDING' && (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Pending owner approval" />
+                )}
+                {c.approvalStatus === 'REJECTED' && (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-red-400" title={c.reviewNote || 'Rejected by owner'} />
+                )}
                 <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-muted-foreground">
                   {c._count?.menuItems || 0}
                 </span>
@@ -200,6 +230,8 @@ export function MenuManager() {
           </Button>
         </div>
 
+        {isManager && <ManagerApprovalHint what="Menu categories and items" />}
+
         {itemsLoading ? (
           <div className="flex justify-center py-10">
             <LoadingSpinner size="lg" />
@@ -237,6 +269,10 @@ export function MenuManager() {
                       )}
                     </div>
                     <p className="line-clamp-1 text-sm font-semibold">{item.name}</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                      <ApprovalBadge status={item.approvalStatus} reviewNote={item.reviewNote} />
+                      <BranchChip branchName={item.branch?.name} />
+                    </div>
                     <p className="line-clamp-1 text-xs text-muted-foreground">
                       {item.description}
                     </p>
@@ -314,15 +350,41 @@ export function MenuManager() {
             <DialogTitle>Add category</DialogTitle>
             <DialogDescription>Categories group items on the customer menu.</DialogDescription>
           </DialogHeader>
-          <div>
-            <Label htmlFor="cat-name">Name</Label>
-            <Input
-              id="cat-name"
-              value={newCatName}
-              onChange={(e) => setNewCatName(e.target.value)}
-              placeholder="e.g. Desserts, Beverages"
-              autoFocus
-            />
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="cat-name">Name</Label>
+              <Input
+                id="cat-name"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="e.g. Desserts, Beverages"
+                autoFocus
+              />
+            </div>
+            {!isManager && (
+              <div>
+                <Label>Branch scope</Label>
+                <Select value={newCatBranch} onValueChange={setNewCatBranch}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="shared">Shared — all branches</SelectItem>
+                    {branches.map((b: any) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name} only
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {isManager && (
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                This category will be created for your branch and sent to the owner for
+                approval.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewCatOpen(false)}>

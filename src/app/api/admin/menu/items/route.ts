@@ -5,6 +5,8 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  scopeBranchId,
+  requiresOwnerApproval,
   writeAudit,
   enforcePlanLimit,
 } from '@/lib/api-helpers'
@@ -13,15 +15,24 @@ import { menuItemSchema } from '@/lib/validations'
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/menu/items
+// Branch-scoped managers see their own branch's items PLUS restaurant-wide
+// shared items; owners see everything (shared + all branches).
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  const branchId = scopeBranchId(user)
   const items = await db.menuItem.findMany({
-    where: restaurantId ? { restaurantId } : {},
+    where: {
+      ...(restaurantId ? { restaurantId } : {}),
+      ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+    },
     include: {
       category: true,
+      branch: { select: { id: true, name: true } },
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
       variants: { orderBy: { sortOrder: 'asc' } },
       modifierGroups: {
         include: { modifiers: { orderBy: { sortOrder: 'asc' } } },
@@ -34,6 +45,9 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/menu/items
+// Owners create items instantly — the item inherits the category's branch
+// scope (shared category → shared item). Branch MANAGERS create items inside
+// their own branch that stay PENDING until the owner approves them.
 export async function POST(req: NextRequest) {
   try {
     const { user, error } = await requirePermission('menu.create')
@@ -62,13 +76,31 @@ export async function POST(req: NextRequest) {
       return fail('Invalid category. Please select a valid category or create one first.', 422)
     }
 
+    // Branch scope: a branch manager can only add items under a SHARED
+    // category or one belonging to their own branch; the item itself is
+    // always branch-scoped to the manager's branch. Owners inherit the
+    // category's scope (shared category → shared item).
+    const managerBranchId = scopeBranchId(user)
+    if (managerBranchId && cat.branchId && cat.branchId !== managerBranchId) {
+      return fail('You can only add items to your own branch or shared categories.', 403)
+    }
+    const targetBranchId = managerBranchId || (body as any)?.branchId || cat.branchId || null
+    if (targetBranchId) {
+      const branch = await db.branch.findUnique({ where: { id: targetBranchId } })
+      if (!branch || branch.restaurantId !== restaurantId) {
+        return fail('Invalid branch — it does not belong to your restaurant.', 422)
+      }
+    }
+
     // Plan limit enforcement
     const limitErr = await enforcePlanLimit(restaurantId, 'maxMenuItems')
     if (limitErr) return limitErr
 
+    const pending = requiresOwnerApproval(user.role as string)
     const item = await db.menuItem.create({
       data: {
         restaurantId,
+        branchId: targetBranchId,
         categoryId: data.categoryId,
         name: data.name,
         description: data.description || null,
@@ -84,6 +116,8 @@ export async function POST(req: NextRequest) {
         prepTime: data.prepTime ?? 15,
         tags: data.tags || null,
         sortOrder: data.sortOrder ?? 0,
+        approvalStatus: pending ? 'PENDING' : 'APPROVED',
+        requestedById: pending ? user.id : null,
         variants: data.variants?.length
           ? {
               create: data.variants.map((v, idx) => ({
@@ -101,11 +135,19 @@ export async function POST(req: NextRequest) {
           : undefined,
       },
       include: {
+        category: true,
+        branch: { select: { id: true, name: true } },
+        requestedBy: { select: { id: true, name: true } },
+        reviewedBy: { select: { id: true, name: true } },
         variants: true,
         modifierGroups: { include: { modifiers: true } },
       },
     })
-    writeAudit(user, 'CREATE', 'MENU_ITEM', item.id, { name: item.name })
+    writeAudit(user, 'CREATE', 'MENU_ITEM', item.id, {
+      name: item.name,
+      branchId: targetBranchId,
+      approvalStatus: item.approvalStatus,
+    })
     return ok(item, 201)
   } catch (err: any) {
     console.error('[menu-items POST] unhandled error:', err)

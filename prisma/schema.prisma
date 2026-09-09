@@ -51,6 +51,26 @@ model User {
   platformFeeConfigUpdates PlatformFeeConfig[] @relation("PlatformFeeConfigUpdatedBy")
   rbacPermissions RolePermission[]
   rbacModuleAccess RoleModuleAccess[]
+  // Owner-approval workflow (branch managers' creations reviewed by owner)
+  menuCategoriesRequested MenuCategory[] @relation("MenuCategoryRequestedBy")
+  menuCategoriesReviewed  MenuCategory[] @relation("MenuCategoryReviewedBy")
+  menuItemsRequested      MenuItem[]     @relation("MenuItemRequestedBy")
+  menuItemsReviewed       MenuItem[]     @relation("MenuItemReviewedBy")
+  tablesRequested         Table[]        @relation("TableRequestedBy")
+  tablesReviewed          Table[]        @relation("TableReviewedBy")
+  requestedStaff          User[]         @relation("StaffRequestedBy")
+  requestedByUser         User?          @relation("StaffRequestedBy", fields: [requestedStaffById], references: [id], onDelete: SetNull)
+  reviewedStaff           User[]         @relation("StaffReviewedBy")
+  reviewedByUser          User?          @relation("StaffReviewedBy", fields: [reviewedStaffById], references: [id], onDelete: SetNull)
+
+  // Staff-approval workflow fields (used when a BRANCH MANAGER creates a
+  // staff account: the account stays inactive until the owner approves it).
+  // APPROVED (default) = created/reviewed by owner or super admin.
+  approvalStatus   String    @default("APPROVED") // PENDING | APPROVED | REJECTED
+  requestedStaffById String?
+  reviewedStaffById  String?
+  reviewNote       String?
+  reviewedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -58,6 +78,7 @@ model User {
   @@index([restaurantId])
   @@index([branchId])
   @@index([role])
+  @@index([approvalStatus])
 }
 
 // ============================================================================
@@ -298,6 +319,8 @@ model Branch {
   users         User[]     @relation("BranchStaff")
   tables        Table[]
   orders        Order[]
+  menuCategories MenuCategory[]
+  menuItems     MenuItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -323,6 +346,15 @@ model Table {
 
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   branch        Branch?    @relation(fields: [branchId],   references: [id], onDelete: SetNull)
+  // Owner-approval workflow: tables created by a BRANCH MANAGER stay PENDING
+  // (inactive QR) until the restaurant owner approves them.
+  approvalStatus String   @default("APPROVED") // PENDING | APPROVED | REJECTED
+  requestedById  String?
+  reviewedById   String?
+  reviewNote     String?
+  reviewedAt     DateTime?
+  requestedBy   User?      @relation("TableRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  reviewedBy    User?      @relation("TableReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   orders        Order[]
   serviceRequests ServiceRequest[]
 
@@ -331,6 +363,8 @@ model Table {
 
   @@unique([restaurantId, number])
   @@index([restaurantId])
+  @@index([branchId])
+  @@index([approvalStatus])
   @@index([status])
 }
 
@@ -341,24 +375,45 @@ model Table {
 model MenuCategory {
   id            String   @id @default(cuid())
   restaurantId  String
+  // Branch scope: null = restaurant-wide (shared by every branch, owner-
+  // managed); a branchId = branch-specific category (created/managed by the
+  // branch manager, subject to owner approval).
+  branchId      String?
   name          String   // Starters, Biryani, Main Course, Breads, Beverages, Desserts
   description   String?
   icon          String?  // emoji or icon name
   sortOrder     Int      @default(0)
   active        Boolean  @default(true)
+  // Owner-approval workflow: when a BRANCH MANAGER creates/edits a category
+  // it is PENDING until the restaurant owner approves it. Only APPROVED
+  // categories are served to customers.
+  approvalStatus String   @default("APPROVED") // PENDING | APPROVED | REJECTED
+  requestedById  String?
+  reviewedById   String?
+  reviewNote     String?
+  reviewedAt     DateTime?
 
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  requestedBy   User?      @relation("MenuCategoryRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  reviewedBy    User?      @relation("MenuCategoryReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   menuItems     MenuItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([restaurantId])
+  @@index([branchId])
+  @@index([approvalStatus])
 }
 
 model MenuItem {
   id            String   @id @default(cuid())
   restaurantId  String
+  // Branch scope (denormalised from the creating context): null = shared
+  // restaurant-wide item; a branchId = branch-specific item owned by that
+  // branch's manager (requires owner approval to go live).
+  branchId      String?
   categoryId    String
   name          String
   description   String?
@@ -383,9 +438,18 @@ model MenuItem {
   sortOrder     Int      @default(0)
   // Prep time estimate (minutes)
   prepTime      Int      @default(15)
+  // Owner-approval workflow (same semantics as MenuCategory.approvalStatus).
+  approvalStatus String   @default("APPROVED") // PENDING | APPROVED | REJECTED
+  requestedById  String?
+  reviewedById   String?
+  reviewNote     String?
+  reviewedAt     DateTime?
 
   restaurant    Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branch        Branch?        @relation(fields: [branchId], references: [id], onDelete: Cascade)
   category      MenuCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  requestedBy   User?          @relation("MenuItemRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  reviewedBy    User?          @relation("MenuItemReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   variants      MenuVariant[]
   modifierGroups ModifierGroup[] @relation("ItemModifierGroups")
   orderItems    OrderItem[]
@@ -394,9 +458,11 @@ model MenuItem {
   updatedAt DateTime @updatedAt
 
   @@index([restaurantId])
+  @@index([branchId])
   @@index([categoryId])
   @@index([available])
   @@index([soldOut])
+  @@index([approvalStatus])
 }
 
 model MenuVariant {

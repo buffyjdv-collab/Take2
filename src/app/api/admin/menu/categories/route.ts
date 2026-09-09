@@ -5,6 +5,8 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  scopeBranchId,
+  requiresOwnerApproval,
   writeAudit,
   enforcePlanLimit,
 } from '@/lib/api-helpers'
@@ -13,20 +15,34 @@ import { menuCategorySchema } from '@/lib/validations'
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/menu/categories
+// Branch-scoped managers see their own branch's categories PLUS the
+// restaurant-wide (branchId = null) shared categories created by the owner.
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  const branchId = scopeBranchId(user)
   const categories = await db.menuCategory.findMany({
-    where: restaurantId ? { restaurantId } : {},
+    where: {
+      ...(restaurantId ? { restaurantId } : {}),
+      ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+    },
     orderBy: { sortOrder: 'asc' },
-    include: { _count: { select: { menuItems: true } } },
+    include: {
+      branch: { select: { id: true, name: true } },
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
+      _count: { select: { menuItems: true } },
+    },
   })
   return ok(categories)
 }
 
 // POST /api/admin/menu/categories
+// Owners create categories instantly (restaurant-wide or for a chosen
+// branch). Branch MANAGERS create branch categories that stay PENDING until
+// the owner approves them.
 export async function POST(req: NextRequest) {
   try {
     const { user, error } = await requirePermission('menu.create')
@@ -52,6 +68,18 @@ export async function POST(req: NextRequest) {
     const limitErr = await enforcePlanLimit(restaurantId, 'maxCategories')
     if (limitErr) return limitErr
 
+    // Branch scope: a branch manager ALWAYS creates inside their own branch;
+    // owners may pass a branchId (or omit it for a restaurant-wide category).
+    const managerBranchId = scopeBranchId(user)
+    let targetBranchId: string | null = managerBranchId || (body as any)?.branchId || null
+    if (targetBranchId) {
+      const branch = await db.branch.findUnique({ where: { id: targetBranchId } })
+      if (!branch || branch.restaurantId !== restaurantId) {
+        return fail('Invalid branch — it does not belong to your restaurant.', 422)
+      }
+    }
+
+    const pending = requiresOwnerApproval(user.role as string)
     const maxSort = await db.menuCategory.aggregate({
       where: { restaurantId },
       _max: { sortOrder: true },
@@ -59,14 +87,27 @@ export async function POST(req: NextRequest) {
     const category = await db.menuCategory.create({
       data: {
         restaurantId,
+        branchId: targetBranchId,
         name: data.name,
         description: data.description || null,
         icon: data.icon || null,
         sortOrder: data.sortOrder ?? (maxSort._max.sortOrder || 0) + 1,
         active: data.active ?? true,
+        approvalStatus: pending ? 'PENDING' : 'APPROVED',
+        requestedById: pending ? user.id : null,
+      },
+      include: {
+        branch: { select: { id: true, name: true } },
+        requestedBy: { select: { id: true, name: true } },
+        reviewedBy: { select: { id: true, name: true } },
+        _count: { select: { menuItems: true } },
       },
     })
-    writeAudit(user, 'CREATE', 'MENU_CATEGORY', category.id, { name: category.name })
+    writeAudit(user, 'CREATE', 'MENU_CATEGORY', category.id, {
+      name: category.name,
+      branchId: targetBranchId,
+      approvalStatus: category.approvalStatus,
+    })
     return ok(category, 201)
   } catch (err: any) {
     console.error('[categories POST] unhandled error:', err)

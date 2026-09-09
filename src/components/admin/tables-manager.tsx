@@ -29,11 +29,13 @@ import {
 } from '@/components/ui/select'
 import { useAdminTables, useAdminBranches, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users, ExternalLink, Copy, Check, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { LoadingSpinner, EmptyState, ButtonWithLoading } from '@/components/restaurant/loading-states'
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
 import { OrderStatusBadge } from '@/components/restaurant/order-status-badge'
+import { ApprovalBadge, ManagerApprovalHint } from './approval-badge'
 
 const STATUS_COLOR: Record<string, string> = {
   AVAILABLE: 'bg-green-100 text-green-700',
@@ -49,6 +51,8 @@ export function TablesManager() {
   const { data, isLoading } = useAdminTables()
   const { data: branchData } = useAdminBranches()
   const branches = branchData?.branches || []
+  const { data: session } = useSession()
+  const isManager = session?.user?.role === 'MANAGER'
   const qc = useQueryClient()
   const [editing, setEditing] = useState<any | null>(null)
   const [open, setOpen] = useState(false)
@@ -141,6 +145,8 @@ export function TablesManager() {
         </Button>
       </div>
 
+      {isManager && <ManagerApprovalHint what="Tables" />}
+
       {isLoading ? (
         <div className="flex justify-center py-10"><LoadingSpinner size="lg" /></div>
       ) : !data?.length ? (
@@ -161,6 +167,9 @@ export function TablesManager() {
                       {t.label && (
                         <p className="text-xs text-muted-foreground">{t.label}</p>
                       )}
+                      <div className="mt-1">
+                        <ApprovalBadge status={t.approvalStatus} reviewNote={t.reviewNote} />
+                      </div>
                     </div>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_COLOR[t.status] || 'bg-slate-100'}`}

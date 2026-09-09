@@ -64,6 +64,8 @@ export const NAV: NavItem[] = [
   { key: 'modifiers', label: 'Modifiers', icon: UtensilsCrossed, permission: 'menu.update', group: 'restaurant' },
   { key: 'tables', label: 'Tables & QR', icon: Table2, permission: 'tables.manage', group: 'restaurant' },
   { key: 'branches', label: 'Branches', icon: Building2, permission: 'branches.manage', group: 'restaurant' },
+  { key: 'approvals', label: 'Approvals', icon: Shield, permission: 'approvals.manage', group: 'restaurant' },
+  { key: 'network-reports', label: 'Network Reports', icon: Globe2, permission: 'reports.view', group: 'restaurant' },
   { key: 'kitchen', label: 'Kitchen', icon: ChefHat, permission: 'kitchen.view', group: 'restaurant' },
   { key: 'waiter', label: 'Waiter', icon: BellRing, permission: 'waiter.view', group: 'restaurant' },
   { key: 'billing', label: 'Billing', icon: Receipt, permission: 'billing.manage', group: 'restaurant' },

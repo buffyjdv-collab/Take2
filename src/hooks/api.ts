@@ -301,6 +301,13 @@ export interface AdminBranch {
   createdAt: string
   tableCount: number
   users: Array<{ id: string; name: string; email: string; role: string; active: boolean }>
+  pendingApprovals?: {
+    categories: number
+    items: number
+    tables: number
+    staff: number
+    total: number
+  }
   stats: BranchStats
 }
 
@@ -421,5 +428,83 @@ export function useAdminServiceRequests(status?: string) {
     queryKey: ['admin-service-requests', status],
     queryFn: () => api<any[]>(`/api/admin/service-requests${qs}`),
     refetchInterval: 20_000,
+  })
+}
+
+// ---------------------------------------------------------------- Approvals
+
+export interface ApprovalRequestRow {
+  id: string
+  entityType: 'MENU_CATEGORY' | 'MENU_ITEM' | 'TABLE' | 'STAFF'
+  title: string
+  detail: string
+  branchId: string | null
+  branchName: string | null
+  requestedByName: string | null
+  createdAt: string
+  status: string
+  reviewNote: string | null
+  reviewedByName: string | null
+  reviewedAt: string | null
+}
+
+export interface ApprovalCounts {
+  PENDING: { all: number; MENU_CATEGORY: number; MENU_ITEM: number; TABLE: number; STAFF: number }
+  REJECTED: { all: number; MENU_CATEGORY: number; MENU_ITEM: number; TABLE: number; STAFF: number }
+}
+
+export function useAdminApprovals(status: string, type: string) {
+  const qs = new URLSearchParams({ status, type })
+  return useQuery({
+    queryKey: ['admin-approvals', status, type],
+    queryFn: () =>
+      api<{ requests: ApprovalRequestRow[]; counts: ApprovalCounts }>(
+        `/api/admin/approvals?${qs.toString()}`,
+      ),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useReviewApproval() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: {
+      entityType: string
+      entityId: string
+      action: 'APPROVE' | 'REJECT'
+      note?: string
+    }) =>
+      api<any>('/api/admin/approvals', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-approvals'] })
+      qc.invalidateQueries({ queryKey: ['admin-categories'] })
+      qc.invalidateQueries({ queryKey: ['admin-menu-items'] })
+      qc.invalidateQueries({ queryKey: ['admin-tables'] })
+      qc.invalidateQueries({ queryKey: ['admin-staff'] })
+      qc.invalidateQueries({ queryKey: ['admin-branches'] })
+    },
+  })
+}
+
+// ------------------------------------------------------------ Network reports
+
+export function useNetworkReports(params: {
+  from: string
+  to: string
+  groupBy: string
+  branchId?: string
+}) {
+  const qs = new URLSearchParams({
+    from: params.from,
+    to: params.to,
+    groupBy: params.groupBy,
+    ...(params.branchId ? { branchId: params.branchId } : {}),
+  })
+  return useQuery({
+    queryKey: ['network-reports', params],
+    queryFn: () => api<any>(`/api/admin/reports/network?${qs.toString()}`),
   })
 }

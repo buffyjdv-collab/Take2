@@ -35,6 +35,7 @@ import {
   TrendingUp,
   Store,
   Users,
+  Clock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { LoadingSpinner, EmptyState, ButtonWithLoading } from '@/components/restaurant/loading-states'
@@ -420,6 +421,22 @@ export function BranchesManager() {
                       icon={TrendingUp}
                     />
                   </div>
+
+                  {/* Pending owner approvals for this branch */}
+                  {!!b.pendingApprovals?.total && (
+                    <a
+                      href="#approvals"
+                      className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                    >
+                      <Clock className="h-3.5 w-3.5" />
+                      {b.pendingApprovals.total} creation{b.pendingApprovals.total === 1 ? '' : 's'}
+                      awaiting your approval
+                      <span className="text-amber-600">
+                        ({b.pendingApprovals.categories} menu · {b.pendingApprovals.items} items ·{' '}
+                        {b.pendingApprovals.tables} tables · {b.pendingApprovals.staff} staff)
+                      </span>
+                    </a>
+                  )}
 
                   {/* Products monitoring */}
                   <div>

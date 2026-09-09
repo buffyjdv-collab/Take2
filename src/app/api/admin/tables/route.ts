@@ -6,6 +6,7 @@ import {
   fail,
   scopeRestaurantId,
   scopeBranchId,
+  requiresOwnerApproval,
   writeAudit,
   generateToken,
   enforcePlanLimit,
@@ -43,6 +44,8 @@ export async function GET(req: NextRequest) {
     orderBy: { number: 'asc' },
     include: {
       branch: { select: { id: true, name: true } },
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
       _count: { select: { orders: true } },
       orders: {
         where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
@@ -98,6 +101,10 @@ export async function POST(req: NextRequest) {
   const limitErr = await enforcePlanLimit(restaurantId, 'maxTables')
   if (limitErr) return limitErr
 
+  // Owner-approval workflow: tables created by a branch MANAGER stay PENDING
+  // until the restaurant owner approves them from the Approvals centre.
+  const pending = requiresOwnerApproval(user.role as string)
+
   const table = await db.table.create({
     data: {
       restaurantId,
@@ -110,8 +117,18 @@ export async function POST(req: NextRequest) {
       active: data.active ?? true,
       qrCodeToken: generateToken(`t-${data.number.toLowerCase()}`),
       status: 'AVAILABLE',
+      approvalStatus: pending ? 'PENDING' : 'APPROVED',
+      requestedById: pending ? user.id : null,
+    },
+    include: {
+      branch: { select: { id: true, name: true } },
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
     },
   })
-  writeAudit(user, 'CREATE', 'TABLE', table.id, { number: table.number })
+  writeAudit(user, 'CREATE', 'TABLE', table.id, {
+    number: table.number,
+    approvalStatus: table.approvalStatus,
+  })
   return ok(table, 201)
 }

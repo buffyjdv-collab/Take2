@@ -58,33 +58,74 @@ export async function GET(req: NextRequest) {
     status: { not: 'CANCELLED' },
   }
 
-  const [branches, weekOrders, weekItems] = await Promise.all([
-    db.branch.findMany({
-      where: { restaurantId, ...(branchScope ? { id: branchScope } : {}) },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        _count: { select: { tables: true } },
-        users: {
-          select: { id: true, name: true, email: true, role: true, active: true },
-          orderBy: { createdAt: 'asc' },
+  const [branches, weekOrders, weekItems, pendingCats, pendingItems, pendingTables, pendingStaff] =
+    await Promise.all([
+      db.branch.findMany({
+        where: { restaurantId, ...(branchScope ? { id: branchScope } : {}) },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          _count: { select: { tables: true } },
+          users: {
+            select: { id: true, name: true, email: true, role: true, active: true },
+            orderBy: { createdAt: 'asc' },
+          },
         },
-      },
-    }),
-    db.order.findMany({
-      where: orderBase,
-      select: { branchId: true, grandTotal: true, placedAt: true },
-    }),
-    db.orderItem.findMany({
-      where: { order: orderBase },
-      select: {
-        order: { select: { branchId: true } },
-        menuItemId: true,
-        menuItemName: true,
-        quantity: true,
-        totalPrice: true,
-      },
-    }),
-  ])
+      }),
+      db.order.findMany({
+        where: orderBase,
+        select: { branchId: true, grandTotal: true, placedAt: true },
+      }),
+      db.orderItem.findMany({
+        where: { order: orderBase },
+        select: {
+          order: { select: { branchId: true } },
+          menuItemId: true,
+          menuItemName: true,
+          quantity: true,
+          totalPrice: true,
+        },
+      }),
+      // Owner-approval pipeline: pending creations per branch (branch
+      // managers' menu categories / items / tables / staff awaiting sign-off).
+      db.menuCategory.groupBy({
+        by: ['branchId'],
+        where: { restaurantId, approvalStatus: 'PENDING', branchId: { not: null } },
+        _count: { _all: true },
+      }),
+      db.menuItem.groupBy({
+        by: ['branchId'],
+        where: { restaurantId, approvalStatus: 'PENDING', branchId: { not: null } },
+        _count: { _all: true },
+      }),
+      db.table.groupBy({
+        by: ['branchId'],
+        where: { restaurantId, approvalStatus: 'PENDING', branchId: { not: null } },
+        _count: { _all: true },
+      }),
+      db.user.groupBy({
+        by: ['branchId'],
+        where: { restaurantId, approvalStatus: 'PENDING', branchId: { not: null } },
+        _count: { _all: true },
+      }),
+    ])
+
+  const pendingMap = new Map<string, { categories: number; items: number; tables: number; staff: number }>()
+  const emptyPending = () => ({ categories: 0, items: 0, tables: 0, staff: 0 })
+  const bumpPending = (
+    rows: Array<{ branchId: string | null; _count: { _all: number } }>,
+    key: 'categories' | 'items' | 'tables' | 'staff',
+  ) => {
+    for (const r of rows) {
+      if (!r.branchId) continue
+      const cur = pendingMap.get(r.branchId) || emptyPending()
+      cur[key] += r._count._all
+      pendingMap.set(r.branchId, cur)
+    }
+  }
+  bumpPending(pendingCats, 'categories')
+  bumpPending(pendingItems, 'items')
+  bumpPending(pendingTables, 'tables')
+  bumpPending(pendingStaff, 'staff')
 
   interface Stat {
     todayOrders: number
@@ -140,6 +181,7 @@ export async function GET(req: NextRequest) {
 
   const shaped = branches.map((b) => {
     const s = stats.get(b.id) || emptyStat()
+    const p = pendingMap.get(b.id) || { categories: 0, items: 0, tables: 0, staff: 0 }
     return {
       id: b.id,
       name: b.name,
@@ -149,6 +191,10 @@ export async function GET(req: NextRequest) {
       createdAt: b.createdAt,
       tableCount: b._count.tables,
       users: b.users,
+      pendingApprovals: {
+        ...p,
+        total: p.categories + p.items + p.tables + p.staff,
+      },
       stats: {
         todayOrders: s.todayOrders,
         todayRevenue: +s.todayRevenue.toFixed(2),

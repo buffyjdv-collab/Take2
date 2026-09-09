@@ -5,6 +5,7 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  canActOnBranch,
   writeAudit,
 } from '@/lib/api-helpers'
 import { menuItemSchema } from '@/lib/validations'
@@ -21,6 +22,27 @@ async function getItemOr404(id: string, restaurantId: string | null) {
   return item
 }
 
+// Content fields change what the customer sees/pays — when a BRANCH MANAGER
+// edits any of these the item goes back to PENDING for owner approval.
+// Operational toggles (available / soldOut) stay with the manager so they can
+// run day-to-day service without waiting for the owner.
+const CONTENT_FIELDS = [
+  'name',
+  'description',
+  'image',
+  'categoryId',
+  'isVeg',
+  'isSpicy',
+  'basePrice',
+  'taxRate',
+  'isFeatured',
+  'isPopular',
+  'prepTime',
+  'tags',
+  'variants',
+  'modifierGroupIds',
+] as const
+
 // GET /api/admin/menu/items/[id]
 export async function GET(
   req: NextRequest,
@@ -33,6 +55,7 @@ export async function GET(
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   const item = await getItemOr404(id, restaurantId)
   if (!item) return fail('Menu item not found.', 404)
+  if (!canActOnBranch(user, item.branchId)) return fail('Menu item not found.', 404)
   return ok(item)
 }
 
@@ -49,6 +72,9 @@ export async function PATCH(
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   const item = await getItemOr404(id, restaurantId)
   if (!item) return fail('Menu item not found.', 404)
+  // Branch-scoped managers can only touch their own branch's items.
+  if (!canActOnBranch(user, item.branchId)) return fail('Menu item not found.', 404)
+  const isManager = user.role === 'MANAGER'
 
   let body: unknown
   try {
@@ -68,7 +94,14 @@ export async function PATCH(
     if (!cat || cat.restaurantId !== item.restaurantId) {
       return fail('Invalid category.', 422)
     }
+    // Managers can only move items within shared / own-branch categories.
+    if (isManager && cat.branchId && cat.branchId !== item.branchId) {
+      return fail('You can only move items to your own branch or shared categories.', 403)
+    }
   }
+
+  // Manager content edits re-enter the owner-approval queue.
+  const touchesContent = isManager && CONTENT_FIELDS.some((f) => (data as any)[f] !== undefined)
 
   // Sync variants: simplistic upsert + delete missing
   const updated = await db.$transaction(async (tx) => {
@@ -92,6 +125,15 @@ export async function PATCH(
         ...(data.prepTime !== undefined ? { prepTime: data.prepTime } : {}),
         ...(data.tags !== undefined ? { tags: data.tags || null } : {}),
         ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
+        ...(touchesContent
+          ? {
+              approvalStatus: 'PENDING',
+              requestedById: user.id,
+              reviewNote: null,
+              reviewedAt: null,
+              reviewedById: null,
+            }
+          : {}),
       },
     })
 
@@ -158,6 +200,9 @@ export async function PATCH(
       where: { id },
       include: {
         category: true,
+        branch: { select: { id: true, name: true } },
+        requestedBy: { select: { id: true, name: true } },
+        reviewedBy: { select: { id: true, name: true } },
         variants: { orderBy: { sortOrder: 'asc' } },
         modifierGroups: {
           include: { modifiers: { orderBy: { sortOrder: 'asc' } } },
@@ -167,7 +212,10 @@ export async function PATCH(
     })
   })
 
-  writeAudit(user, 'UPDATE', 'MENU_ITEM', id, data)
+  writeAudit(user, 'UPDATE', 'MENU_ITEM', id, {
+    ...data,
+    ...(touchesContent ? { resubmittedForApproval: true } : {}),
+  })
   return ok(updated)
   } catch (err: any) {
     console.error('[menu-items PATCH] unhandled error:', err)
@@ -190,6 +238,8 @@ export async function DELETE(
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   const item = await getItemOr404(id, restaurantId)
   if (!item) return fail('Menu item not found.', 404)
+  // Branch-scoped managers can only delete their own branch's items.
+  if (!canActOnBranch(user, item.branchId)) return fail('Menu item not found.', 404)
 
   // Check if used in any orders
   const used = await db.orderItem.count({ where: { menuItemId: id } })

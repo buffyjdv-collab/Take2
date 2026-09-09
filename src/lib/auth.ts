@@ -111,10 +111,17 @@ export const DEFAULT_PERMISSIONS: Record<string, string[]> = {
   // Reports
   'REPORTS.VIEW': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'CASHIER'],
   // Staff management
-  'STAFF.CREATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
-  'STAFF.READ': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
-  'STAFF.UPDATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
-  'STAFF.DELETE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  // Branch MANAGERs may manage staff of their own branch only — every staff
+  // account they create stays inactive until the RESTAURANT_OWNER approves it
+  // (see /api/admin/approvals).
+  'STAFF.CREATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
+  'STAFF.READ': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
+  'STAFF.UPDATE': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
+  'STAFF.DELETE': ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
+  // Owner approval centre — review menu categories / items / tables / staff
+  // created by branch managers before they go live.
+  'APPROVALS.VIEW': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  'APPROVALS.MANAGE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
   // Restaurant settings
   'SETTINGS.MANAGE': ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
   // Multi-restaurant management (super admin only)
@@ -268,6 +275,8 @@ export const SIDEBAR_MODULES: Array<{ key: string; label: string; group: 'platfo
   { key: 'modifiers', label: 'Modifiers', group: 'restaurant' },
   { key: 'tables', label: 'Tables & QR', group: 'restaurant' },
   { key: 'branches', label: 'Branches', group: 'restaurant' },
+  { key: 'approvals', label: 'Approvals', group: 'restaurant' },
+  { key: 'network-reports', label: 'Network Reports', group: 'restaurant' },
   { key: 'kitchen', label: 'Kitchen', group: 'restaurant' },
   { key: 'waiter', label: 'Waiter', group: 'restaurant' },
   { key: 'billing', label: 'Billing', group: 'restaurant' },
@@ -292,11 +301,15 @@ export const DEFAULT_MODULE_VISIBILITY: Record<string, string[]> = {
   modifiers: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   tables: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   branches: ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  approvals: ['RESTAURANT_OWNER'],
+  'network-reports': ['RESTAURANT_OWNER'],
   kitchen: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'KITCHEN_STAFF'],
   waiter: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'WAITER'],
   billing: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'CASHIER'],
   reports: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER', 'CASHIER'],
-  staff: ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
+  // Branch managers now run their branch's team: they can see & manage their
+  // own branch's staff (owner approval required for new accounts).
+  staff: ['SUPER_ADMIN', 'RESTAURANT_OWNER', 'MANAGER'],
   settings: ['SUPER_ADMIN', 'RESTAURANT_OWNER'],
 }
 

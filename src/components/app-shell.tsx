@@ -9,6 +9,8 @@ import { MenuManager } from './admin/menu-manager'
 import { ModifierGroupsManager } from './admin/modifier-groups-manager'
 import { TablesManager } from './admin/tables-manager'
 import { BranchesManager } from './admin/branches-manager'
+import { ApprovalsManager } from './admin/approvals-manager'
+import { NetworkReports } from './admin/network-reports'
 import { ReportsManager } from './admin/reports-manager'
 import { SettingsManager } from './admin/settings-manager'
 import { StaffManager } from './admin/staff-manager'
@@ -197,6 +199,8 @@ export function AppShell({ serverSession }: AppShellProps) {
           {hash === 'modifiers' && <ModifierGroupsManager />}
           {hash === 'tables' && <TablesManager />}
           {hash === 'branches' && <BranchesManager />}
+          {hash === 'approvals' && <ApprovalsManager />}
+          {hash === 'network-reports' && <NetworkReports />}
           {hash === 'kitchen' && <KitchenDisplay />}
           {hash === 'waiter' && <WaiterDashboard />}
           {hash === 'billing' && <BillingManager />}

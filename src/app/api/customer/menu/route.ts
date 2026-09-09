@@ -16,6 +16,11 @@ export async function GET(req: NextRequest) {
   })
   if (!table) return fail('Invalid or unknown QR code.', 404)
   if (!table.active) return fail('This table is currently inactive.', 410)
+  // Owner-approval workflow: tables created by a branch manager only go live
+  // once the restaurant owner approves them.
+  if (table.approvalStatus !== 'APPROVED') {
+    return fail('This table is not open for orders yet. Please contact the staff.', 410)
+  }
 
   const restaurant = table.restaurant
   if (!restaurant) return fail('Restaurant not found.', 404)
@@ -29,13 +34,36 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // Branch-scoped menu: the table's branch sees (a) restaurant-wide shared
+  // categories/items (branchId = null) and (b) its own branch's approved
+  // items. Everything shown must ALSO be owner-approved (approvalStatus =
+  // APPROVED) — manager creations stay hidden until the owner signs off.
+  const branchScope = table.branchId
+    ? {
+        OR: [{ branchId: null }, { branchId: table.branchId }],
+      }
+    : {}
+
   const [categories, items, modifierGroups, paymentMethods] = await Promise.all([
     db.menuCategory.findMany({
-      where: { restaurantId: restaurant.id, active: true },
+      where: {
+        restaurantId: restaurant.id,
+        active: true,
+        approvalStatus: 'APPROVED',
+        ...branchScope,
+      },
       orderBy: { sortOrder: 'asc' },
     }),
     db.menuItem.findMany({
-      where: { restaurantId: restaurant.id },
+      where: {
+        restaurantId: restaurant.id,
+        approvalStatus: 'APPROVED',
+        ...branchScope,
+        category: {
+          approvalStatus: 'APPROVED',
+          ...branchScope,
+        },
+      },
       include: {
         category: true,
         variants: { orderBy: { sortOrder: 'asc' } },

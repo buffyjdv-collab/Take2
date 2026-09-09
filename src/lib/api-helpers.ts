@@ -94,6 +94,15 @@ export function canActOnBranch(user: SessionUser, entityBranchId: string | null)
   return entityBranchId === branchId
 }
 
+/**
+ * Owner-approval workflow: entities created by a BRANCH MANAGER (menu
+ * categories, menu items, tables, staff) stay PENDING until the restaurant
+ * owner approves them. Owner / super admin creations are live immediately.
+ */
+export function requiresOwnerApproval(role: string): boolean {
+  return role === 'MANAGER'
+}
+
 export async function requirePermission(permission: string) {
   const user = await getSessionUser()
   if (!user) return { user: null, error: unauthorized() }

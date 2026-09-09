@@ -44,6 +44,7 @@ import { ROLE_LABELS, PERMISSIONS } from '@/lib/auth'
 import { ALL_ROLES, NON_SUPER_ROLES } from '@/lib/validations'
 import { hasPermission, canAccessRole } from '@/lib/auth'
 import { formatRelative } from '@/lib/format'
+import { ApprovalBadge, ManagerApprovalHint } from './approval-badge'
 
 const ROLE_TINT: Record<string, string> = {
   SUPER_ADMIN: 'bg-purple-100 text-purple-700',
@@ -54,10 +55,14 @@ const ROLE_TINT: Record<string, string> = {
   CASHIER: 'bg-slate-100 text-slate-700',
 }
 
-/** Roles that the current user is allowed to assign */
+/** Roles that the current user is allowed to assign.
+ *  Branch managers can hire junior staff but never appoint MANAGERs —
+ *  that stays an owner-only decision (also enforced server-side). */
 function getAssignableRoles(myRole: string): readonly string[] {
   if (myRole === 'SUPER_ADMIN') return ALL_ROLES
-  return NON_SUPER_ROLES.filter((r) => canAccessRole(myRole, r))
+  const roles = NON_SUPER_ROLES.filter((r) => canAccessRole(myRole, r))
+  if (myRole === 'MANAGER') return roles.filter((r) => r !== 'MANAGER')
+  return roles
 }
 
 export function StaffManager() {
@@ -79,6 +84,7 @@ export function StaffManager() {
 
   const myRole = ((session?.user as any)?.role as string) || ''
   const isSuperAdmin = myRole === 'SUPER_ADMIN'
+  const isManager = myRole === 'MANAGER'
   const assignableRoles = getAssignableRoles(myRole)
   const { data: branchData } = useAdminBranches()
   const branches = branchData?.branches || []
@@ -136,24 +142,31 @@ export function StaffManager() {
           role: editing.role,
           active: editing.active,
           phone: editing.phone,
-          branchId: editing.branchId || null,
+          ...(isManager ? {} : { branchId: editing.branchId || null }),
         }
         if (editing.password) patch.password = editing.password
         await api(`/api/admin/staff/${editing.id}`, {
           method: 'PATCH',
           body: JSON.stringify(patch),
         })
-        toast.success('Staff updated')
       } else {
         await api(`/api/admin/staff`, {
           method: 'POST',
           body: JSON.stringify(editing),
         })
-        toast.success('Staff created')
       }
       qc.invalidateQueries({ queryKey: ['admin-staff'] })
       setOpen(false)
       setEditing(null)
+      toast.success(
+        editing.id
+          ? isManager
+            ? 'Staff updated — resubmitted for owner approval'
+            : 'Staff updated'
+          : isManager
+          ? 'Staff submitted — awaiting owner approval'
+          : 'Staff created',
+      )
     } catch (err: any) {
       toast.error(err.message || 'Save failed')
     }
@@ -239,6 +252,10 @@ export function StaffManager() {
           <Plus className="mr-2 h-4 w-4" /> Add staff
         </Button>
       </div>
+
+      {isManager && (
+        <ManagerApprovalHint what="Staff accounts" />
+      )}
 
       {/* Summary stat cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -384,6 +401,9 @@ export function StaffManager() {
                             inactive
                           </span>
                         )}
+                        <div className="mt-0.5">
+                          <ApprovalBadge status={u.approvalStatus} reviewNote={u.reviewNote} />
+                        </div>
                       </td>
                       <td className="p-3 text-muted-foreground">{u.email}</td>
                       <td className="p-3 text-muted-foreground">
@@ -437,6 +457,12 @@ export function StaffManager() {
                       <td className="p-3">
                         <Switch
                           checked={u.active}
+                          disabled={isManager && !u.active}
+                          title={
+                            isManager && !u.active
+                              ? 'Only the restaurant owner can approve and activate accounts'
+                              : undefined
+                          }
                           onCheckedChange={() => handleToggleActive(u)}
                         />
                       </td>
@@ -536,7 +562,7 @@ export function StaffManager() {
                     ))}
                   </SelectContent>
                 </Select>
-                {branches.length > 0 && (
+                {branches.length > 0 && !isManager && (
                   <div className="mt-2">
                     <Label>Branch (optional)</Label>
                     <Select
@@ -564,6 +590,12 @@ export function StaffManager() {
                     </p>
                   </div>
                 )}
+                {isManager && (
+                  <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    This staff member will be assigned to your branch and activated only after
+                    the restaurant owner approves the request.
+                  </p>
+                )}
                 {editing.role && (
                   <div className="mt-2 rounded-lg border bg-slate-50 p-2">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Permissions for {ROLE_LABELS[editing.role] || editing.role}</p>
@@ -583,11 +615,16 @@ export function StaffManager() {
                 <Label>Phone (optional)</Label>
                 <Input value={editing.phone || ''} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
               </div>
-              {editing.id && (
+              {editing.id && !isManager && (
                 <label className="flex items-center gap-2">
                   <Switch checked={editing.active} onCheckedChange={(v) => setEditing({ ...editing, active: v })} />
                   <span className="text-sm">Active</span>
                 </label>
+              )}
+              {editing.id && isManager && (
+                <p className="text-xs text-muted-foreground">
+                  Activation is controlled by the restaurant owner's approval.
+                </p>
               )}
               {editing.id && editing.createdAt && (
                 <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">

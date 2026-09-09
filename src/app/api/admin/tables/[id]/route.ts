@@ -73,6 +73,17 @@ export async function PATCH(
     if (existing) return fail(`Table ${data.number} already exists.`, 409)
   }
 
+  // Owner-approval workflow: content edits (number / label / capacity / branch
+  // move) by a branch MANAGER send the table back to PENDING. The active
+  // toggle stays operational so managers can open/close a table day-to-day.
+  const isManager = user.role === 'MANAGER'
+  const touchesContent =
+    isManager &&
+    (data.number !== undefined ||
+      data.label !== undefined ||
+      data.capacity !== undefined ||
+      data.branchId !== undefined)
+
   const updated = await db.table.update({
     where: { id },
     data: {
@@ -81,9 +92,26 @@ export async function PATCH(
       ...(data.capacity !== undefined ? { capacity: data.capacity } : {}),
       ...(data.active !== undefined ? { active: data.active } : {}),
       ...(data.branchId !== undefined ? { branchId: data.branchId || null } : {}),
+      ...(touchesContent
+        ? {
+            approvalStatus: 'PENDING',
+            requestedById: user.id,
+            reviewNote: null,
+            reviewedAt: null,
+            reviewedById: null,
+          }
+        : {}),
+    },
+    include: {
+      branch: { select: { id: true, name: true } },
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
     },
   })
-  writeAudit(user, 'UPDATE', 'TABLE', id, data)
+  writeAudit(user, 'UPDATE', 'TABLE', id, {
+    ...data,
+    ...(touchesContent ? { resubmittedForApproval: true } : {}),
+  })
   return ok(updated)
 }
 

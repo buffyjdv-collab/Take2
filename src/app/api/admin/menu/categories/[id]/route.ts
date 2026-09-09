@@ -5,6 +5,8 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  scopeBranchId,
+  canActOnBranch,
   writeAudit,
 } from '@/lib/api-helpers'
 import { menuCategorySchema } from '@/lib/validations'
@@ -19,6 +21,13 @@ async function getCategoryOr404(id: string, restaurantId: string | null) {
 }
 
 // PATCH /api/admin/menu/categories/[id]
+//
+// Approval rules:
+//  - Owners / super admins edit freely; their edits keep the category live.
+//  - Branch managers may only edit categories of THEIR OWN branch; any
+//    content change sends the category back to PENDING for owner review.
+//  - Nobody but the manager's owner chain can touch restaurant-wide
+//    (branchId = null) categories from a branch account.
 export async function PATCH(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
@@ -31,6 +40,10 @@ export async function PATCH(
   const cat = await getCategoryOr404(id, restaurantId)
   if (!cat) return fail('Category not found.', 404)
 
+  // Branch-scoped managers can only touch their own branch's categories.
+  if (!canActOnBranch(user, cat.branchId)) return fail('Category not found.', 404)
+  const isManager = user.role === 'MANAGER'
+
   let body: unknown
   try {
     body = await req.json()
@@ -41,19 +54,34 @@ export async function PATCH(
   if (!parsed.success) {
     return fail(parsed.error.issues[0]?.message || 'Invalid input.', 422)
   }
+  const data = parsed.data
+
   const updated = await db.menuCategory.update({
     where: { id },
     data: {
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.description !== undefined
-        ? { description: parsed.data.description || null }
+      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...(data.description !== undefined
+        ? { description: data.description || null }
         : {}),
-      ...(parsed.data.icon !== undefined ? { icon: parsed.data.icon || null } : {}),
-      ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
-      ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
+      ...(data.icon !== undefined ? { icon: data.icon || null } : {}),
+      ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
+      ...(data.active !== undefined ? { active: data.active } : {}),
+      // Manager edits re-enter the owner-approval queue.
+      ...(isManager
+        ? { approvalStatus: 'PENDING', requestedById: user.id, reviewNote: null, reviewedAt: null, reviewedById: null }
+        : {}),
+    },
+    include: {
+      branch: { select: { id: true, name: true } },
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
+      _count: { select: { menuItems: true } },
     },
   })
-  writeAudit(user, 'UPDATE', 'MENU_CATEGORY', id, parsed.data)
+  writeAudit(user, 'UPDATE', 'MENU_CATEGORY', id, {
+    ...parsed.data,
+    ...(isManager ? { resubmittedForApproval: true } : {}),
+  })
   return ok(updated)
 }
 
@@ -69,6 +97,8 @@ export async function DELETE(
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
   const cat = await getCategoryOr404(id, restaurantId)
   if (!cat) return fail('Category not found.', 404)
+  // Branch-scoped managers can only delete their own branch's categories.
+  if (!canActOnBranch(user, cat.branchId)) return fail('Category not found.', 404)
   // Check for menu items — refuse delete if items exist
   const itemCount = await db.menuItem.count({ where: { categoryId: id } })
   if (itemCount > 0) {

@@ -6,6 +6,7 @@ import {
   ok,
   fail,
   scopeRestaurantId,
+  scopeBranchId,
   writeAudit,
   enforcePlanLimit,
 } from '@/lib/api-helpers'
@@ -15,13 +16,18 @@ import { canAccessRole } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/staff
+// Owners see every staff member of the restaurant; branch-scoped MANAGERs
+// see ONLY their own branch's team (their own staff details, nothing else).
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('staff.manage')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  const branchId = scopeBranchId(user)
   // SUPER_ADMIN without restaurantId filter sees everyone
-  const where = restaurantId ? { restaurantId } : {}
+  const where = restaurantId
+    ? { restaurantId, ...(branchId ? { branchId } : {}) }
+    : {}
   const users = await db.user.findMany({
     where,
     select: {
@@ -34,9 +40,14 @@ export async function GET(req: NextRequest) {
       avatar: true,
       restaurantId: true,
       branchId: true,
+      approvalStatus: true,
+      reviewNote: true,
+      reviewedAt: true,
       createdAt: true,
       restaurant: { select: { id: true, name: true } },
       branch: { select: { id: true, name: true } },
+      requestedByUser: { select: { id: true, name: true } },
+      reviewedByUser: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: 'desc' },
   })
@@ -44,6 +55,11 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/staff
+//
+// Owners / super admins create staff directly (active immediately).
+// Branch MANAGERS can hire their own branch's staff, but every account they
+// create stays INACTIVE + PENDING until the restaurant owner approves it
+// from the Approvals centre.
 export async function POST(req: NextRequest) {
   const { user, error } = await requirePermission('staff.manage')
   if (error) return error
@@ -78,6 +94,11 @@ export async function POST(req: NextRequest) {
   if (data.role === 'RESTAURANT_OWNER' && user.role === 'RESTAURANT_OWNER') {
     return fail('Only super admin can create restaurant owners.', 403)
   }
+  // A branch MANAGER cannot create another MANAGER — managers are appointed
+  // by the owner from the Branches page.
+  if (data.role === 'MANAGER' && user.role === 'MANAGER') {
+    return fail('Only the restaurant owner can create managers.', 403)
+  }
   if (!canAccessRole(user.role as string, data.role)) {
     return fail(`You cannot create a user with role ${data.role}.`, 403)
   }
@@ -95,9 +116,13 @@ export async function POST(req: NextRequest) {
     return fail('Restaurant is required for this role.', 400)
   }
 
+  // Branch assignment: a branch manager ALWAYS hires into their own branch.
+  const managerBranchId = scopeBranchId(user)
+  const targetBranchId = managerBranchId || data.branchId || null
+
   // A branchId (if provided) must reference a branch of the target restaurant.
-  if (data.branchId) {
-    const branch = await db.branch.findUnique({ where: { id: data.branchId } })
+  if (targetBranchId) {
+    const branch = await db.branch.findUnique({ where: { id: targetBranchId } })
     if (!branch || (finalRestaurantId && branch.restaurantId !== finalRestaurantId)) {
       return fail('Invalid branch — it does not belong to your restaurant.', 422)
     }
@@ -109,6 +134,10 @@ export async function POST(req: NextRequest) {
     if (limitErr) return limitErr
   }
 
+  // Owner-approval workflow: staff created by a branch MANAGER wait for the
+  // owner's sign-off before they can sign in.
+  const pending = user.role === 'MANAGER'
+
   const passwordHash = await bcrypt.hash(data.password, 10)
   const newUser = await db.user.create({
     data: {
@@ -118,8 +147,10 @@ export async function POST(req: NextRequest) {
       role: data.role,
       phone: data.phone || null,
       restaurantId: data.role === 'SUPER_ADMIN' ? null : finalRestaurantId,
-      branchId: data.branchId || null,
-      active: true,
+      branchId: data.role === 'SUPER_ADMIN' ? null : targetBranchId,
+      active: !pending,
+      approvalStatus: pending ? 'PENDING' : 'APPROVED',
+      requestedStaffById: pending ? user.id : null,
     },
     select: {
       id: true,
@@ -130,11 +161,17 @@ export async function POST(req: NextRequest) {
       phone: true,
       restaurantId: true,
       branchId: true,
+      approvalStatus: true,
+      reviewNote: true,
+      requestedByUser: { select: { id: true, name: true } },
+      reviewedByUser: { select: { id: true, name: true } },
     },
   })
   writeAudit(user, 'CREATE', 'USER', newUser.id, {
     email: newUser.email,
     role: newUser.role,
+    branchId: targetBranchId,
+    approvalStatus: newUser.approvalStatus,
   })
   return ok(newUser, 201)
 }
