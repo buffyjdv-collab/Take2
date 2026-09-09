@@ -61,7 +61,12 @@ const STEPS: StepConfig[] = [
 ]
 
 function stepIndex(status: string): number {
-  const order = ['NEW', 'PENDING_PAYMENT', 'ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'COMPLETED']
+  // NOTE: this array must contain ONLY statuses that map 1:1 onto STEPS.
+  // PENDING_PAYMENT deliberately lives OUTSIDE it — it is special-cased to
+  // step 0 ("Placed") below. Including it in the array shifts every later
+  // status one step ahead (ACCEPTED highlighted "Cooking", PREPARING
+  // highlighted "Ready", READY highlighted "Served").
+  const order = ['NEW', 'ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'COMPLETED']
   const i = order.indexOf(status)
   if (i < 0) return 0
   // PENDING_PAYMENT maps to the "Placed" step
