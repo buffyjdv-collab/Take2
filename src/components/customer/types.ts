@@ -56,6 +56,9 @@ export interface RestaurantInfo {
   description?: string | null
   address: string
   phone: string
+  email?: string | null
+  gstNumber?: string | null
+  panNumber?: string | null
   isOpen: boolean
   openingTime: string
   closingTime: string

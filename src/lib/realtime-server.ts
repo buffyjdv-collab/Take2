@@ -2,7 +2,9 @@ import { io, Socket } from 'socket.io-client'
 
 // Server-side socket client used by API routes to publish events
 // to the realtime mini-service running on port 3003.
-const REALTIME_URL = 'http://localhost:3003'
+// Override REALTIME_URL when the mini-service runs on another host
+// (e.g. wss://realtime.example.com on Railway/Fly/Render deployments).
+const REALTIME_URL = process.env.REALTIME_URL || 'http://localhost:3003'
 
 let socket: Socket | null = null
 

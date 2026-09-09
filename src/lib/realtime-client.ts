@@ -2,7 +2,9 @@ import { io as serverIo, Socket } from 'socket.io-client'
 
 // Singleton realtime client used across admin / kitchen / waiter / customer views.
 // The gateway expects path="/" + port specified as ?XTransformPort=3003.
-const REALTIME_URL = '/?XTransformPort=3003'
+// Override NEXT_PUBLIC_REALTIME_URL when the realtime gateway lives on a
+// separate host (e.g. wss://realtime.example.com).
+const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL || '/?XTransformPort=3003'
 
 let socket: Socket | null = null
 

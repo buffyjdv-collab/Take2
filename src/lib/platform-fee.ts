@@ -226,7 +226,7 @@ export function describeFeeConfig(c: PlatformFeeConfig): string {
       break
   }
 
-  const caps = []
+  const caps: string[] = []
   if (c.minimumFee > 0) caps.push(`min ${fmtPaise(c.minimumFee)}`)
   if (c.maximumFee !== null) caps.push(`max ${fmtPaise(c.maximumFee)}`)
   if (caps.length) desc += ` (${caps.join(', ')})`

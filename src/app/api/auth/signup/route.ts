@@ -180,7 +180,7 @@ export async function POST(req: Request) {
     )
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      const issues = err.issues || err.errors || []
+      const issues = err.issues || []
       return NextResponse.json(
         { success: false, error: issues[0]?.message || 'Invalid input' },
         { status: 400 },

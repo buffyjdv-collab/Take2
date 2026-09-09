@@ -80,7 +80,7 @@ export async function GET(
     margin: 2,
     color: { dark: '#0f172a', light: '#ffffff' },
   })
-  return new NextResponse(png, {
+  return new NextResponse(new Uint8Array(png), {
     status: 200,
     headers: {
       'Content-Type': 'image/png',

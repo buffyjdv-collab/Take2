@@ -79,7 +79,7 @@ export async function POST(
     select: { platformFeeId: true },
   })
 
-  if (status === 'PAID' || status === 'COLLECTED_DIRECT') {
+  if (status === 'PAID') {
     // Mark covered fees as COLLECTED
     if (coveredEntries.length > 0) {
       await db.platformFee.updateMany({

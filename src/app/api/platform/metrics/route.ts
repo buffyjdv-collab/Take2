@@ -78,7 +78,7 @@ export async function GET() {
   }))
 
   // Last 14 days trend: orders per day
-  const days14 = []
+  const days14: { date: string; orders: number }[] = []
   for (let i = 13; i >= 0; i--) {
     const start = new Date(now)
     start.setDate(now.getDate() - i)

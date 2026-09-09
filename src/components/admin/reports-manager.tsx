@@ -74,9 +74,9 @@ type SortDir = 'asc' | 'desc'
 function sortRows<T>(rows: T[], sortKey: string, sortDir: SortDir): T[] {
   const dir = sortDir === 'asc' ? 1 : -1
   return [...rows].sort((a, b) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const av = (a as any)[sortKey]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const bv = (b as any)[sortKey]
     if (typeof av === 'string' && typeof bv === 'string') {
       // ISO date strings (YYYY-MM-DD or YYYY-MM) sort correctly via localeCompare

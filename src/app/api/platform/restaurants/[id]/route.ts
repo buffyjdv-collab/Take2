@@ -162,7 +162,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, data: updated })
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: err.errors[0]?.message }, { status: 400 })
+      return NextResponse.json({ error: err.issues[0]?.message }, { status: 400 })
     }
     console.error('[platform/restaurants/:id] error:', err)
     return NextResponse.json({ error: 'Failed to update tenant' }, { status: 500 })

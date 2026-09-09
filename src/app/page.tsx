@@ -1,4 +1,4 @@
-import { getServerSession } from 'next-auth'
+import { getServerSession, type Session } from 'next-auth'
 import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { LandingPage } from '@/components/landing-page'
@@ -22,7 +22,7 @@ export default async function Home({ searchParams }: HomePageProps) {
 
   // Wrap in try/catch — a stale/invalid JWT cookie should never crash the page.
   // If session decoding fails, we simply show the landing page (user signs in again).
-  let session: Awaited<ReturnType<typeof getServerSession>> = null
+  let session: Session | null = null
   try {
     session = await getServerSession(authOptions)
   } catch (err) {
