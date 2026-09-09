@@ -269,15 +269,25 @@ export function CheckoutSheet({
         setStep('processing')
         // Brief processing delay for UX, then show success
         await new Promise((r) => setTimeout(r, 600))
-        setSuccessMessage(
-          t === 'CASH'
+        // Contextual wording: in existing-order mode (post-serve payment)
+        // the order was placed long ago — thank the customer instead of
+        // saying "Order placed!" again.
+        // NOTE: keep the message in a local — setSuccessMessage is async and
+        // reading the state right after would toast the STALE value.
+        const message = existingOrderId
+          ? t === 'CASH'
+            ? 'Thank you! Our waiter will collect the cash shortly.'
+            : t === 'COUNTER'
+              ? 'Thank you! Please pay at the billing counter on your way out.'
+              : 'Thank you! You can settle the bill before leaving.'
+          : t === 'CASH'
             ? 'Order placed! Please hand the cash to your waiter.'
             : t === 'COUNTER'
               ? 'Order placed! Please pay at the billing counter.'
-              : 'Order placed! You can settle the bill before leaving.',
-        )
+              : 'Order placed! You can settle the bill before leaving.'
+        setSuccessMessage(message)
         setStep('success')
-        toast.success(successMessage, { duration: 4000 })
+        toast.success(message, { duration: 4000 })
         return
       }
 

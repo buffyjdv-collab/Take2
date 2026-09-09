@@ -42,6 +42,9 @@ import { cn } from '@/lib/utils'
 import { VegBadge } from '@/components/restaurant/veg-badge'
 import type { RestaurantInfo } from './types'
 import { CheckoutSheet } from './checkout-sheet'
+import {
+  HIDE_POST_SERVE_TYPES,
+} from './payment-method-picker'
 
 // ---------------------------------------------------------------------------
 // Status config — compact stepper used inside each order card
@@ -129,6 +132,42 @@ export function OrderTrackingList({
   })
 
   const orders = data?.orders || []
+
+  // ---- Post-serve payment prompt (Zepto-style) ----
+  // When an order whose payment method is CASH or COUNTER is marked SERVED,
+  // automatically open the payment sheet once so the customer can settle the
+  // bill (online methods) or acknowledge the cash/counter flow. Guarded by a
+  // sessionStorage flag so it never nags more than once per order per tab;
+  // the card's Pay button remains available for manual reopen.
+  useEffect(() => {
+    if (payOrderId) return // a payment sheet is already open
+    const target = (orders as any[]).find((o) => {
+      if (o.status !== 'SERVED' || o.paymentStatus === 'PAID') return false
+      return o.paymentMethod === 'CASH' || o.paymentMethod === 'COUNTER'
+    })
+    if (!target) return
+    const key = `postpay-popup-${target.id}`
+    if (sessionStorage.getItem(key)) return
+    sessionStorage.setItem(key, 'shown')
+    setPayOrderId(target.id)
+    toast.info(`Order ${target.orderNumber} has been served`, {
+      description: 'Please complete your payment when ready.',
+    })
+  }, [orders, payOrderId])
+
+  // The order currently being paid — drives real totals + hiding the
+  // pay-on-delivery method the customer already chose at placement.
+  const payingOrder = payOrderId
+    ? (orders as any[]).find((o: any) => o.id === payOrderId)
+    : null
+
+  const postPayHiddenMethodIds: string[] = (() => {
+    const chosen = payingOrder?.paymentMethod as string | undefined
+    if (chosen !== 'CASH' && chosen !== 'COUNTER' && chosen !== 'PAY_LATER') return []
+    return (restaurant.paymentMethods || [])
+      .filter((m) => HIDE_POST_SERVE_TYPES.includes(m.type))
+      .map((m) => m.id)
+  })()
 
   // Auto-expand the most recent order when the list first loads / changes size.
   useEffect(() => {
@@ -280,14 +319,15 @@ export function OrderTrackingList({
           onOpenChange={(o) => !o && setPayOrderId(null)}
           restaurant={restaurant}
           totals={{
-            itemCount: 0,
-            subtotal: 0,
-            taxAmount: 0,
-            serviceCharge: 0,
-            grandTotal: 0,
+            itemCount: payingOrder?.items?.length || 0,
+            subtotal: payingOrder?.subtotal || 0,
+            taxAmount: payingOrder?.taxAmount || 0,
+            serviceCharge: payingOrder?.serviceCharge || 0,
+            grandTotal: payingOrder?.grandTotal || 0,
           }}
           items={[]}
           existingOrderId={payOrderId}
+          hiddenMethodIds={postPayHiddenMethodIds}
           tableToken={tableToken}
           skipCustomerDetails
           onCheckoutComplete={() => {
@@ -341,6 +381,10 @@ function OrderCard({
       !!order.prePaymentRequested ||
       !!order.postPaymentRequested)
   const canOrderMore = ['ACCEPTED', 'PREPARING', 'READY', 'SERVED'].includes(order.status)
+  // Served + unpaid orders are payable NOW (auto-prompt may have been
+  // dismissed — the customer needs a manual way back to the payment sheet).
+  const canPayNow =
+    !isPaid && !isCompleted && (needsToPay || order.status === 'SERVED')
   const itemCount = order.items?.length || 0
 
   return (
@@ -462,8 +506,8 @@ function OrderCard({
                 })}
               </div>
 
-              {/* Payment due banner */}
-              {needsToPay && (
+              {/* Payment due banner (also shown post-serve for unpaid orders) */}
+              {canPayNow && (
                 <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
                   <div className="flex items-center gap-2">
                     <CreditCard className="h-4 w-4 text-amber-700" />

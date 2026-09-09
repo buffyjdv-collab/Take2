@@ -13,6 +13,13 @@ import { Separator } from '@/components/ui/separator'
 import { SignupWizard } from './signup-wizard'
 import { PLANS } from '@/lib/plans'
 
+// Demo-account autofill is a DEV/DEMO convenience. It is hidden unless
+// NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS=true is set at BUILD time (NEXT_PUBLIC_*
+// vars are inlined into the client bundle) — production leaves it unset so
+// no credentials appear on the home page.
+const SHOW_DEMO_CREDENTIALS =
+  process.env.NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS === 'true'
+
 const DEMO_CREDS = [
   { role: 'Owner', email: 'owner@spicegarden.in' },
   { role: 'Manager', email: 'manager@spicegarden.in' },
@@ -53,6 +60,7 @@ export function LandingPage() {
   }
 
   const quickLogin = (cred: { email: string; role: string }) => {
+    if (!SHOW_DEMO_CREDENTIALS) return
     setEmail(cred.email)
     setPassword('password123')
     toast.info(`Loaded ${cred.role} demo credentials`)
@@ -355,33 +363,35 @@ export function LandingPage() {
             </CardContent>
           </Card>
 
-          <Card className="bg-orange-50/50">
-            <CardHeader>
-              <CardTitle className="text-base">Demo accounts</CardTitle>
-              <CardDescription>
-                All demo accounts use the password{' '}
-                <code className="rounded bg-white px-1 py-0.5 text-xs">
-                  password123
-                </code>
-                . Tap a role to autofill.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-2 sm:grid-cols-2">
-              {DEMO_CREDS.map((c) => (
-                <button
-                  key={c.email}
-                  onClick={() => quickLogin(c)}
-                  className="flex items-center justify-between rounded-lg border border-orange-200 bg-white px-3 py-2 text-left text-sm transition-colors hover:bg-orange-50"
-                >
-                  <div>
-                    <p className="font-semibold">{c.role}</p>
-                    <p className="text-xs text-muted-foreground">{c.email}</p>
-                  </div>
-                  <span className="text-xs text-orange-600">Use →</span>
-                </button>
-              ))}
-            </CardContent>
-          </Card>
+          {SHOW_DEMO_CREDENTIALS && (
+            <Card className="bg-orange-50/50">
+              <CardHeader>
+                <CardTitle className="text-base">Demo accounts</CardTitle>
+                <CardDescription>
+                  All demo accounts use the password{' '}
+                  <code className="rounded bg-white px-1 py-0.5 text-xs">
+                    password123
+                  </code>
+                  . Tap a role to autofill.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-2 sm:grid-cols-2">
+                {DEMO_CREDS.map((c) => (
+                  <button
+                    key={c.email}
+                    onClick={() => quickLogin(c)}
+                    className="flex items-center justify-between rounded-lg border border-orange-200 bg-white px-3 py-2 text-left text-sm transition-colors hover:bg-orange-50"
+                  >
+                    <div>
+                      <p className="font-semibold">{c.role}</p>
+                      <p className="text-xs text-muted-foreground">{c.email}</p>
+                    </div>
+                    <span className="text-xs text-orange-600">Use →</span>
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         <footer className="border-t py-6 text-center text-xs text-muted-foreground">
