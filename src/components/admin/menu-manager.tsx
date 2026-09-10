@@ -394,7 +394,18 @@ export function MenuManager() {
                           variant="ghost"
                           className="h-7 w-7"
                           onClick={() => {
-                            setEditingItem(item)
+                            // Normalise nullable DB columns (description /
+                            // image / tags are String? in Prisma) so the
+                            // PATCH body never sends null — a stored null
+                            // used to 422 the save ("expected string,
+                            // received null") and block ALL edits, including
+                            // image changes.
+                            setEditingItem({
+                              ...item,
+                              description: item.description ?? '',
+                              image: item.image ?? '',
+                              tags: item.tags ?? '',
+                            })
                             setEditOpen(true)
                           }}
                         >

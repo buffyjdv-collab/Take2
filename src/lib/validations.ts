@@ -214,7 +214,15 @@ export const menuItemImageSchema = z
 
 export const menuItemSchema = z.object({
   name: z.string().min(1).max(120),
-  description: z.string().max(600).optional(),
+  // DB columns description/tags/image are nullable (String?). The edit dialog
+  // round-trips the raw GET row, so a stored null used to 422 the whole PATCH
+  // with Zod v4's "Invalid input: expected string, received null". Accept
+  // null and normalise to '' exactly like menuItemImageSchema does.
+  description: z
+    .union([z.string(), z.null()])
+    .transform((v) => (v == null ? '' : v))
+    .pipe(z.string().max(600))
+    .optional(),
   image: menuItemImageSchema,
   categoryId: z.string().min(1),
   isVeg: z.boolean().optional(),
@@ -226,7 +234,11 @@ export const menuItemSchema = z.object({
   isFeatured: z.boolean().optional(),
   isPopular: z.boolean().optional(),
   prepTime: z.number().int().min(0).max(600).optional(),
-  tags: z.string().max(280).optional(),
+  tags: z
+    .union([z.string(), z.null()])
+    .transform((v) => (v == null ? '' : v))
+    .pipe(z.string().max(280))
+    .optional(),
   sortOrder: z.number().int().min(0).optional(),
   variants: z.array(menuVariantSchema).optional(),
   modifierGroupIds: z.array(z.string()).optional(),
