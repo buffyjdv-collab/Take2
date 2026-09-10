@@ -12,6 +12,7 @@ import {
   enforcePlanLimit,
 } from '@/lib/api-helpers'
 import { tableSchema } from '@/lib/validations'
+import { slugifyTokenPrefix } from '@/lib/tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,7 +116,10 @@ export async function POST(req: NextRequest) {
       label: data.label || null,
       capacity: data.capacity,
       active: data.active ?? true,
-      qrCodeToken: generateToken(`t-${data.number.toLowerCase()}`),
+      // Token prefix must be URL-safe: table numbers like "Medchal 01" or
+      // "Med 009" contain spaces that break QR scanner → browser handoffs.
+      // slugifyTokenPrefix turns them into "medchal-01" / "med-009".
+      qrCodeToken: generateToken(`t-${slugifyTokenPrefix(data.number)}`),
       status: 'AVAILABLE',
       approvalStatus: pending ? 'PENDING' : 'APPROVED',
       requestedById: pending ? user.id : null,

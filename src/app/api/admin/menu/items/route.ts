@@ -15,8 +15,9 @@ import { menuItemSchema } from '@/lib/validations'
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/menu/items
-// Branch-scoped managers see their own branch's items PLUS restaurant-wide
-// shared items; owners see everything (shared + all branches).
+// STRICT branch scope: branch-assigned staff see ONLY their own branch's
+// items — matching exactly what their branch's QR menu shows. Owners &
+// super admins see everything (all branches + any restaurant-wide items).
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
   const items = await db.menuItem.findMany({
     where: {
       ...(restaurantId ? { restaurantId } : {}),
-      ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+      ...(branchId ? { branchId } : {}),
     },
     include: {
       category: true,
@@ -76,15 +77,19 @@ export async function POST(req: NextRequest) {
       return fail('Invalid category. Please select a valid category or create one first.', 422)
     }
 
-    // Branch scope: a branch manager can only add items under a SHARED
-    // category or one belonging to their own branch; the item itself is
-    // always branch-scoped to the manager's branch. Owners inherit the
-    // category's scope (shared category → shared item).
+    // STRICT menu model: an item is always visible inside its category's
+    // branch scope, so it must inherit the category's branch. Branch staff
+    // may only file items under their own branch's categories — an item
+    // filed under another branch's (or restaurant-wide) category would never
+    // appear on their QR menu.
     const managerBranchId = scopeBranchId(user)
-    if (managerBranchId && cat.branchId && cat.branchId !== managerBranchId) {
-      return fail('You can only add items to your own branch or shared categories.', 403)
+    if (managerBranchId && cat.branchId !== managerBranchId) {
+      return fail(
+        'You can only add items to your own branch categories. Create a category for your branch first.',
+        403,
+      )
     }
-    const targetBranchId = managerBranchId || (body as any)?.branchId || cat.branchId || null
+    const targetBranchId = cat.branchId
     if (targetBranchId) {
       const branch = await db.branch.findUnique({ where: { id: targetBranchId } })
       if (!branch || branch.restaurantId !== restaurantId) {

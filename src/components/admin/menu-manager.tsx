@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,7 +30,6 @@ import { EmptyState, LoadingSpinner, ButtonWithLoading } from '@/components/rest
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
 import { useAdminCategories, useAdminMenuItems, useAdminModifierGroups, useAdminBranches, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
-import { useSession } from 'next-auth/react'
 import { Plus, Pencil, Trash2, Star, Flame, X, UtensilsCrossed, Upload, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -40,6 +40,9 @@ export function MenuManager() {
   const { data: items, isLoading: itemsLoading } = useAdminMenuItems()
   const { data: session } = useSession()
   const isManager = session?.user?.role === 'MANAGER'
+  // The branch this owner/super-admin account is bound to (the restaurant's
+  // main branch). Used as the default branch scope when creating categories.
+  const myBranchId = (session?.user as { branchId?: string | null } | undefined)?.branchId || null
   const { data: branchData } = useAdminBranches()
   const branches = branchData?.branches || []
   const qc = useQueryClient()
@@ -160,7 +163,7 @@ export function MenuManager() {
       <Card className="h-fit">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">Categories</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => setNewCatOpen(true)}>
+          <Button size="sm" variant="outline" onClick={() => { setNewCatBranch(myBranchId || 'shared'); setNewCatOpen(true) }}>
             <Plus className="h-4 w-4" />
           </Button>
         </CardHeader>
@@ -369,15 +372,29 @@ export function MenuManager() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="shared">Shared — all branches</SelectItem>
+                    {myBranchId && (
+                      <SelectItem value={myBranchId}>
+                        My branch (main menu) only
+                      </SelectItem>
+                    )}
                     {branches.map((b: any) => (
                       <SelectItem key={b.id} value={b.id}>
                         {b.name} only
                       </SelectItem>
                     ))}
+                    <SelectItem value="shared">
+                      Restaurant-wide — tables without a branch only
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+            )}
+            {!isManager && (
+              <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                Each branch&apos;s QR menu shows only its own categories. Pick your branch
+                for the main menu — &quot;restaurant-wide&quot; appears exclusively on tables
+                that do not belong to any branch.
+              </p>
             )}
             {isManager && (
               <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -498,10 +515,16 @@ function ItemEditor({
                 </SelectTrigger>
                 <SelectContent>
                   {categories.map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                      {c.branch?.name ? ` · ${c.branch.name}` : ' · Restaurant-wide'}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The item appears only on the category&apos;s branch QR menu.
+              </p>
             </div>
             <div>
               <Label>Base price (₹)</Label>

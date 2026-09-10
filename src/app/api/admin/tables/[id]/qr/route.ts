@@ -9,6 +9,7 @@ import {
   writeAudit,
   generateToken,
 } from '@/lib/api-helpers'
+import { slugifyTokenPrefix } from '@/lib/tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,7 +107,9 @@ export async function POST(
     return fail('Table not found.', 404)
   }
 
-  const newToken = generateToken(`t-${table.number.toLowerCase()}`)
+  // Regenerate with a URL-safe prefix — legacy tokens built from raw table
+  // numbers could contain spaces ("t-medchal 01-…") which phones fail to open.
+  const newToken = generateToken(`t-${slugifyTokenPrefix(table.number)}`)
   const updated = await db.table.update({
     where: { id },
     data: { qrCodeToken: newToken },

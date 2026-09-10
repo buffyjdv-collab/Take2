@@ -15,8 +15,10 @@ import { menuCategorySchema } from '@/lib/validations'
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/menu/categories
-// Branch-scoped managers see their own branch's categories PLUS the
-// restaurant-wide (branchId = null) shared categories created by the owner.
+// STRICT branch scope: branch-assigned staff (manager, kitchen, …) see ONLY
+// their own branch's categories — matching exactly what their branch's QR
+// menu shows. Owners & super admins see everything (all branches + any
+// restaurant-wide categories).
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
   const categories = await db.menuCategory.findMany({
     where: {
       ...(restaurantId ? { restaurantId } : {}),
-      ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+      ...(branchId ? { branchId } : {}),
     },
     orderBy: { sortOrder: 'asc' },
     include: {

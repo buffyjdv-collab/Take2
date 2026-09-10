@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { fail, ok } from '@/lib/api-helpers'
+import { tableTokenVariants } from '@/lib/tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,10 +12,20 @@ export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('table')
   if (!token) return fail('Missing table token.', 400)
 
-  const table = await db.table.findUnique({
-    where: { qrCodeToken: token },
-    include: { restaurant: { include: { settings: true } } },
-  })
+  // Some phone cameras re-encode scanned URLs (space → +, %20 → %2520), so a
+  // few token spellings are tried before giving up — keeps legacy printed
+  // QRs scannable while repaired (URL-safe) tokens become the norm.
+  type TableWithRestaurant = Prisma.TableGetPayload<{
+    include: { restaurant: { include: { settings: true } } }
+  }>
+  let table: TableWithRestaurant | null = null
+  for (const candidate of tableTokenVariants(token)) {
+    table = await db.table.findUnique({
+      where: { qrCodeToken: candidate },
+      include: { restaurant: { include: { settings: true } } },
+    })
+    if (table) break
+  }
   if (!table) return fail('Invalid or unknown QR code.', 404)
   if (!table.active) return fail('This table is currently inactive.', 410)
   // Owner-approval workflow: tables created by a branch manager only go live
@@ -34,15 +46,14 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  // Branch-scoped menu: the table's branch sees (a) restaurant-wide shared
-  // categories/items (branchId = null) and (b) its own branch's approved
-  // items. Everything shown must ALSO be owner-approved (approvalStatus =
-  // APPROVED) — manager creations stay hidden until the owner signs off.
-  const branchScope = table.branchId
-    ? {
-        OR: [{ branchId: null }, { branchId: table.branchId }],
-      }
-    : {}
+  // STRICT branch-scoped menus: each branch's QR menu shows ONLY that
+  // branch's own categories/items. Restaurant-wide (branchId = null) content
+  // is the main menu and appears exclusively on tables that do not belong to
+  // any branch — branch menus never leak into other branches or the main
+  // branch, and the main menu never leaks into branch tables.
+  const menuScope = table.branchId
+    ? { branchId: table.branchId }
+    : { branchId: null }
 
   const [categories, items, modifierGroups, paymentMethods] = await Promise.all([
     db.menuCategory.findMany({
@@ -50,7 +61,7 @@ export async function GET(req: NextRequest) {
         restaurantId: restaurant.id,
         active: true,
         approvalStatus: 'APPROVED',
-        ...branchScope,
+        ...menuScope,
       },
       orderBy: { sortOrder: 'asc' },
     }),
@@ -58,10 +69,12 @@ export async function GET(req: NextRequest) {
       where: {
         restaurantId: restaurant.id,
         approvalStatus: 'APPROVED',
-        ...branchScope,
+        ...menuScope,
+        // The item's category must live in the SAME scope — otherwise an
+        // item filed under another branch's category would be orphaned.
         category: {
           approvalStatus: 'APPROVED',
-          ...branchScope,
+          ...menuScope,
         },
       },
       include: {
