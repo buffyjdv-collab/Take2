@@ -768,3 +768,28 @@ Work Log:
 Stage Summary:
 - EROFS fixed: uploads now target the always-writable tmpfs mount, with writability re-checked on every upload (no stale cache). The overlay FS can flip read-only without breaking uploads.
 - Modified: src/lib/uploads.ts
+
+---
+Task ID: 14
+Agent: Super Z (main)
+Task: Give option to delete QR tables, categories and staff for admin / restaurant owner / manager; hide Permissions column in staff module
+
+Work Log:
+- Environment reset detected: repo re-cloned from GitHub (remote history rewritten; branch-isolation fix present at HEAD 19274cb). bun install re-run.
+- Audit found DELETE APIs already existed for tables/categories/staff but: (a) UI buried them (table delete only inside edit dialog with a wrong Plus icon; category delete only inside editor, NO confirmation), (b) DELETE routes checked semantically wrong legacy permissions (tables.manage->TABLE.UPDATE, menu.delete->MENU_ITEM.DELETE, staff.manage->STAFF.READ).
+- CRITICAL data hazard found: prisma schema had Order.table onDelete: Cascade — deleting a table would silently destroy ALL its orders (reports/revenue corruption). ServiceRequest.table had Restrict (would 500 on delete).
+- Schema fix: Order.table + ServiceRequest.table -> onDelete: SetNull, tableId now nullable. Applied to Neon via `bunx prisma db push` (no data loss). Note: sandbox exports DATABASE_URL=file:/...sqlite which overrides .env — must export Neon URL explicitly for prisma/dev-server commands.
+- API: tables/[id] DELETE -> TABLE.DELETE + P2003 catch -> friendly 409; categories/[id] DELETE -> MENU_CATEGORY.DELETE; staff/[id] DELETE -> STAFF.DELETE (soft delete kept: deactivates, preserves audit trail).
+- Fixed platform bug: POST /api/admin/tables + POST /api/admin/menu/categories ignored ?restaurantId= for SUPER_ADMIN (user.restaurantId null -> 500). Now honor the override like GET/PATCH/DELETE.
+- UI tables-manager: per-card Delete (Trash2) + ConfirmDialog ("order history preserved"), dialog delete icon fixed.
+- UI menu-manager: hover Trash2 per category in sidebar strip with ConfirmDialog (warns "still has N item(s)"); ConfirmDialog added inside CategoryEditor (was unconfirmed); fixed null-category crash in CategoryEditor dialog props (category?.name).
+- UI staff-manager: Permissions column removed from staff table (th/td/userPerms calc); edit-dialog role preview untouched.
+- Nullable-tableId fallout fixed in 5 files (order.table?.number || '-' fallbacks; status route uses order.table.id).
+- E2E scripts/e2e-delete-entities.ts (bun): 22/22 PASS — owner category rules (409 with items, delete empty), owner deletes table WITH orders -> order survives tableId=null, manager branch table+staff (soft delete), super-admin tenant-scoped deletes, waiter 403 denials.
+- Browser verification (agent-browser): tables page shows "Delete table" on every card + confirm dialog copy correct; staff headers = Name|Email|Phone|Role|Branch|Added|Active|Actions (no Permissions); menu page 7 category delete buttons, dialog warns about items; CategoryEditor null crash found & fixed via overlay.
+- Gates: tsc 0 errors, eslint clean, 26/26 unit tests, 22/22 E2E.
+
+Stage Summary:
+- Commit 45cce97 on main. PUSHED to origin/main (19274cb..45cce97 fast-forward) with user-supplied PAT.
+- 15 files changed: schema, 8 API routes, 3 admin components, E2E script.
+- User-visible: owners/managers/admins can now delete tables (cards + dialog), categories (strip hover + editor), staff (row action, soft delete) — all with confirmations; staff table no longer shows the Permissions column; deleting a table no longer destroys its order history.
