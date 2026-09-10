@@ -17,18 +17,44 @@ export const dynamic = 'force-dynamic'
 // GET /api/admin/menu/categories
 // STRICT branch scope: branch-assigned staff (manager, kitchen, …) see ONLY
 // their own branch's categories — matching exactly what their branch's QR
-// menu shows. Owners & super admins see everything (all branches + any
-// restaurant-wide categories).
+// menu shows; the branchId param is ignored for them (server always wins).
+// Owners & super admins may pass ?branchId= to pick the view:
+//   ?branchId=<id>  → exactly that branch's categories (main branch view
+//                     therefore never shows sub-branch categories)
+//   ?branchId=none  → restaurant-wide categories only (branchless tables)
+//   ?branchId=all   → everything (default, backward compatible)
 export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
-  const branchId = scopeBranchId(user)
+  const staffBranchId = scopeBranchId(user)
+
+  // Optional view filter for owners / super admins. undefined = no filter.
+  let branchFilter: string | null | undefined
+  if (!staffBranchId) {
+    const view = req.nextUrl.searchParams.get('branchId')
+    if (view && view !== 'all') {
+      if (view === 'none') {
+        branchFilter = null
+      } else {
+        const branch = await db.branch.findUnique({ where: { id: view } })
+        if (!branch || (restaurantId && branch.restaurantId !== restaurantId)) {
+          return fail('Invalid branch — it does not belong to your restaurant.', 422)
+        }
+        branchFilter = view
+      }
+    }
+  }
+
   const categories = await db.menuCategory.findMany({
     where: {
       ...(restaurantId ? { restaurantId } : {}),
-      ...(branchId ? { branchId } : {}),
+      ...(staffBranchId
+        ? { branchId: staffBranchId }
+        : branchFilter !== undefined
+          ? { branchId: branchFilter }
+          : {}),
     },
     orderBy: { sortOrder: 'asc' },
     include: {

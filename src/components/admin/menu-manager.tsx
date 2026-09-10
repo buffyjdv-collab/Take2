@@ -36,8 +36,6 @@ import { cn } from '@/lib/utils'
 import { ApprovalBadge, BranchChip, ManagerApprovalHint } from './approval-badge'
 
 export function MenuManager() {
-  const { data: categories, isLoading: catLoading } = useAdminCategories()
-  const { data: items, isLoading: itemsLoading } = useAdminMenuItems()
   const { data: session } = useSession()
   const isManager = session?.user?.role === 'MANAGER'
   // The branch this owner/super-admin account is bound to (the restaurant's
@@ -45,6 +43,32 @@ export function MenuManager() {
   const myBranchId = (session?.user as { branchId?: string | null } | undefined)?.branchId || null
   const { data: branchData } = useAdminBranches()
   const branches = branchData?.branches || []
+
+  // Branch menu view. Owners default to their bound (main) branch so
+  // sub-branch menus NEVER mix into the main-branch view; they can switch
+  // to another branch, restaurant-wide, or an all-branches overview. Branch
+  // managers get no selector — the server always forces their own branch.
+  const [scopeOverride, setScopeOverride] = useState<string | null>(null)
+  const menuScope = isManager ? undefined : (scopeOverride ?? myBranchId ?? 'all')
+  const myBranchName = branches.find((b: any) => b.id === myBranchId)?.name
+  const scopeBranchName = branches.find((b: any) => b.id === menuScope)?.name
+  const scopeLabel = isManager
+    ? null
+    : menuScope === 'all'
+      ? 'All branches'
+      : menuScope === 'none'
+        ? 'Restaurant-wide'
+        : scopeBranchName || 'Main branch'
+  // New categories default to the branch currently being viewed.
+  const newCatDefaultBranch =
+    menuScope === 'none'
+      ? 'shared'
+      : menuScope && menuScope !== 'all'
+        ? menuScope
+        : myBranchId || 'shared'
+
+  const { data: categories, isLoading: catLoading } = useAdminCategories(menuScope)
+  const { data: items, isLoading: itemsLoading } = useAdminMenuItems(menuScope)
   const qc = useQueryClient()
 
   const [activeCat, setActiveCat] = useState<string>('')
@@ -55,7 +79,11 @@ export function MenuManager() {
   const [newCatBranch, setNewCatBranch] = useState('shared')
   const [editCat, setEditCat] = useState<any | null>(null)
 
-  const filteredItems = items?.filter((i: any) => i.categoryId === activeCat) || items
+  // '' = no category selected → show every item in the current branch scope.
+  // (An empty filter result is truthy, so the old one-liner hid all items.)
+  const filteredItems = activeCat
+    ? items?.filter((i: any) => i.categoryId === activeCat) || []
+    : items || []
 
   const handleAddItem = () => {
     setEditingItem({
@@ -163,7 +191,14 @@ export function MenuManager() {
       <Card className="h-fit">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">Categories</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => { setNewCatBranch(myBranchId || 'shared'); setNewCatOpen(true) }}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setNewCatBranch(newCatDefaultBranch)
+              setNewCatOpen(true)
+            }}
+          >
             <Plus className="h-4 w-4" />
           </Button>
         </CardHeader>
@@ -224,7 +259,7 @@ export function MenuManager() {
           <div>
             <h1 className="text-2xl font-bold">Menu</h1>
             <p className="text-sm text-muted-foreground">
-              {filteredItems?.length || 0} items
+              {filteredItems?.length || 0} items{scopeLabel ? ` · ${scopeLabel}` : ''}
             </p>
           </div>
           <Button className="bg-orange-600 text-white hover:bg-orange-700" onClick={handleAddItem}>
@@ -232,6 +267,45 @@ export function MenuManager() {
             Add item
           </Button>
         </div>
+
+        {!isManager && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Branch menu
+            </span>
+            <Select
+              value={menuScope}
+              onValueChange={(v) => {
+                setScopeOverride(v)
+                setActiveCat('')
+              }}
+            >
+              <SelectTrigger className="h-8 w-[250px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {myBranchId && (
+                  <SelectItem value={myBranchId}>
+                    {myBranchName ? `${myBranchName} — main branch` : 'My branch — main menu'}
+                  </SelectItem>
+                )}
+                {branches
+                  .filter((b: any) => b.id !== myBranchId)
+                  .map((b: any) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                <SelectItem value="none">Restaurant-wide (branchless tables)</SelectItem>
+                <SelectItem value="all">All branches (overview)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Each branch shows only its own menu — sub-branch items never appear in the main
+              branch view.
+            </p>
+          </div>
+        )}
 
         {isManager && <ManagerApprovalHint what="Menu categories and items" />}
 

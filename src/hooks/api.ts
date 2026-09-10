@@ -256,17 +256,26 @@ export function useMarkCashPaid() {
   })
 }
 
-export function useAdminCategories() {
+// branchId picks the menu view: a concrete branch id (that branch only),
+// 'none' (restaurant-wide only) or 'all' (everything). Branch-scoped staff
+// can omit it — the server always forces their own branch anyway.
+export function useAdminCategories(branchId?: string) {
   return useQuery({
-    queryKey: ['admin-categories'],
-    queryFn: () => api<any[]>(`/api/admin/menu/categories`),
+    queryKey: ['admin-categories', branchId ?? 'all'],
+    queryFn: () =>
+      api<any[]>(
+        `/api/admin/menu/categories${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`,
+      ),
   })
 }
 
-export function useAdminMenuItems() {
+export function useAdminMenuItems(branchId?: string) {
   return useQuery({
-    queryKey: ['admin-menu-items'],
-    queryFn: () => api<any[]>(`/api/admin/menu/items`),
+    queryKey: ['admin-menu-items', branchId ?? 'all'],
+    queryFn: () =>
+      api<any[]>(
+        `/api/admin/menu/items${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`,
+      ),
   })
 }
 
