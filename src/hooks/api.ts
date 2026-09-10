@@ -286,10 +286,14 @@ export function useAdminModifierGroups() {
   })
 }
 
-export function useAdminTables() {
+export function useAdminTables(params: Record<string, string | number | undefined> = {}) {
+  const qs = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== '') qs.set(k, String(v))
+  })
   return useQuery({
-    queryKey: ['admin-tables'],
-    queryFn: () => api<any[]>(`/api/admin/tables`),
+    queryKey: ['admin-tables', params],
+    queryFn: () => api<any[]>(`/api/admin/tables?${qs.toString()}`),
   })
 }
 
@@ -331,10 +335,13 @@ export interface AdminBranchesData {
   } | null
 }
 
-export function useAdminBranches() {
+export function useAdminBranches(enabled = true) {
   return useQuery({
     queryKey: ['admin-branches'],
     queryFn: () => api<AdminBranchesData>(`/api/admin/branches`),
+    // Staff roles (waiter/kitchen/cashier) lack the branches.read permission
+    // — callers gate this on role to avoid a pointless 403 round-trip.
+    enabled,
   })
 }
 

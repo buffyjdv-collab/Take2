@@ -48,11 +48,24 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 export function TablesManager() {
-  const { data, isLoading } = useAdminTables()
-  const { data: branchData } = useAdminBranches()
-  const branches = branchData?.branches || []
   const { data: session } = useSession()
   const isManager = session?.user?.role === 'MANAGER'
+  // Branch-wise filtering is an owner / super-admin capability — branch-scoped
+  // roles see only their own branch's tables (server-forced), so the selector
+  // is hidden for them.
+  const canFilterBranch =
+    session?.user?.role === 'RESTAURANT_OWNER' || session?.user?.role === 'SUPER_ADMIN'
+  // 'all' (default) | '<branchId>' | 'none' (restaurant-wide tables)
+  const [branchView, setBranchView] = useState<string>('all')
+  const { data, isLoading } = useAdminTables(
+    canFilterBranch && branchView !== 'all' ? { branchId: branchView } : {},
+  )
+  const { data: branchData } = useAdminBranches(canFilterBranch)
+  const branches = branchData?.branches || []
+  const branchLabel =
+    branchView === 'none'
+      ? 'restaurant-wide tables'
+      : branches.find((b: any) => b.id === branchView)?.name
   const qc = useQueryClient()
   const [editing, setEditing] = useState<any | null>(null)
   const [open, setOpen] = useState(false)
@@ -133,16 +146,39 @@ export function TablesManager() {
 
   return (
     <div className="space-y-4 p-4 lg:p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Tables & QR codes</h1>
           <p className="text-sm text-muted-foreground">
-            {data?.length || 0} tables · click any to view QR
+            {canFilterBranch && branchView !== 'all' && branchLabel
+              ? `${data?.length || 0} ${branchLabel} · click any to view QR`
+              : `${data?.length || 0} tables · click any to view QR`}
           </p>
         </div>
-        <Button onClick={handleNew} className="bg-orange-600 text-white hover:bg-orange-700">
-          <Plus className="mr-2 h-4 w-4" /> Add table
-        </Button>
+        <div className="flex items-center gap-2">
+          {canFilterBranch && (
+            <Select
+              value={branchView}
+              onValueChange={(v) => setBranchView(v)}
+            >
+              <SelectTrigger className="w-[190px]">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All branches</SelectItem>
+                {branches.map((b: any) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">No branch (restaurant-wide)</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+          <Button onClick={handleNew} className="bg-orange-600 text-white hover:bg-orange-700">
+            <Plus className="mr-2 h-4 w-4" /> Add table
+          </Button>
+        </div>
       </div>
 
       {isManager && <ManagerApprovalHint what="Tables" />}

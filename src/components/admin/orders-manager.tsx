@@ -33,32 +33,54 @@ import { PaymentStatusBadge } from '@/components/restaurant/payment-status-badge
 import { Price, formatINR } from '@/components/restaurant/price'
 import { VegBadge } from '@/components/restaurant/veg-badge'
 import { EmptyState, LoadingSpinner } from '@/components/restaurant/loading-states'
-import { useAdminOrders, useAdminOrder, useUpdateOrderStatus, useRequestPayment, useMarkCashPaid, api } from '@/hooks/api'
+import { useAdminOrders, useAdminOrder, useUpdateOrderStatus, useRequestPayment, useMarkCashPaid, useAdminBranches, api } from '@/hooks/api'
 import { Search, Filter, X, Clock, ChefHat, CheckCircle2, BellRing, Utensils, XCircle, Phone, User, CreditCard, Banknote } from 'lucide-react'
 import { toast } from 'sonner'
+import { useSession } from 'next-auth/react'
 import type { OrderStatus } from '@/lib/types'
 
 const STATUSES: OrderStatus[] = ['NEW', 'ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'COMPLETED', 'CANCELLED']
 
 export function OrdersManager() {
+  const { data: session } = useSession()
+  // Branch-wise filtering is an owner / super-admin capability — branch-scoped
+  // roles (manager, waiter, kitchen, cashier) are forced to their own branch
+  // server-side, so the selector is meaningless (and hidden) for them.
+  const canFilterBranch =
+    session?.user?.role === 'RESTAURANT_OWNER' || session?.user?.role === 'SUPER_ADMIN'
   const [filters, setFilters] = useState<{
     status?: string
     paymentStatus?: string
     search?: string
   }>({})
+  // 'all' (default, unchanged behavior) | '<branchId>' | 'none' (branchless)
+  const [branchView, setBranchView] = useState<string>('all')
+  const { data: branchData } = useAdminBranches(canFilterBranch)
+  const branches = branchData?.branches || []
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
 
-  const { data, isLoading } = useAdminOrders(filters)
+  const { data, isLoading } = useAdminOrders({
+    ...filters,
+    ...(canFilterBranch && branchView !== 'all' ? { branchId: branchView } : {}),
+  })
   const updateStatus = useUpdateOrderStatus()
+  const branchLabel =
+    branchView === 'none'
+      ? 'branchless orders'
+      : branches.find((b: any) => b.id === branchView)?.name
 
   return (
     <div className="space-y-4 p-4 lg:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Orders</h1>
-          <p className="text-sm text-muted-foreground">All orders, live.</p>
+          <p className="text-sm text-muted-foreground">
+            {canFilterBranch && branchView !== 'all'
+              ? `Showing ${branchLabel || 'selected branch'} · live`
+              : 'All orders, live.'}
+          </p>
         </div>
       </div>
 
@@ -76,6 +98,22 @@ export function OrdersManager() {
               }
             />
           </div>
+          {canFilterBranch && (
+            <Select value={branchView} onValueChange={setBranchView}>
+              <SelectTrigger className="w-[190px]">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All branches</SelectItem>
+                {branches.map((b: any) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">No branch (branchless tables)</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <Select
             value={filters.status || 'ALL'}
             onValueChange={(v) =>

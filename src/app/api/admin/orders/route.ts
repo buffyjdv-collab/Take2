@@ -14,7 +14,27 @@ export async function GET(req: NextRequest) {
   const restaurantId = scopeRestaurantId(user, sp.get('restaurantId'))
   // Branch-scoped staff (e.g. a branch manager) only see their own branch's
   // orders — kitchen display, waiter and billing all read through this route.
-  const branchId = scopeBranchId(user)
+  const staffBranchId = scopeBranchId(user)
+  // Owners & super admins can FILTER the list branch-wise via ?branchId=:
+  //   ?branchId=<id>  → only that branch's orders
+  //   ?branchId=none  → branchless orders (tables without a branch)
+  //   ?branchId=all   → everything (default, backward compatible)
+  // The param is ignored for branch-scoped staff — the server always wins.
+  let ownerBranchFilter: string | null | undefined
+  if (!staffBranchId) {
+    const view = sp.get('branchId')
+    if (view && view !== 'all') {
+      if (view === 'none') {
+        ownerBranchFilter = null
+      } else {
+        const branch = await db.branch.findUnique({ where: { id: view } })
+        if (!branch || (restaurantId && branch.restaurantId !== restaurantId)) {
+          return fail('Invalid branch — it does not belong to your restaurant.', 422)
+        }
+        ownerBranchFilter = view
+      }
+    }
+  }
   const status = sp.get('status')
   const paymentStatus = sp.get('paymentStatus')
   const tableId = sp.get('tableId')
@@ -35,7 +55,11 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {}
   if (restaurantId) where.restaurantId = restaurantId
-  if (branchId) where.branchId = branchId
+  if (staffBranchId) {
+    where.branchId = staffBranchId
+  } else if (ownerBranchFilter !== undefined) {
+    where.branchId = ownerBranchFilter
+  }
   if (status) {
     // Support comma-separated statuses (e.g. ?status=ACCEPTED,PREPARING) so
     // views like the Kitchen Display "Preparing" column can show orders in

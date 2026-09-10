@@ -34,13 +34,38 @@ export async function GET(req: NextRequest) {
   const { user, error } = await requirePermission('dashboard.view')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
-  const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  const sp = req.nextUrl.searchParams
+  const restaurantId = scopeRestaurantId(user, sp.get('restaurantId'))
   // Branch-scoped staff only manage their own branch's tables.
-  const branchId = scopeBranchId(user)
+  const staffBranchId = scopeBranchId(user)
+  // Owners & super admins can FILTER the list branch-wise via ?branchId=:
+  //   ?branchId=<id>  → only that branch's tables (and their QR codes)
+  //   ?branchId=none  → restaurant-wide tables without a branch
+  //   ?branchId=all   → everything (default, backward compatible)
+  // The param is ignored for branch-scoped staff — the server always wins.
+  let ownerBranchFilter: string | null | undefined
+  if (!staffBranchId) {
+    const view = sp.get('branchId')
+    if (view && view !== 'all') {
+      if (view === 'none') {
+        ownerBranchFilter = null
+      } else {
+        const branch = await db.branch.findUnique({ where: { id: view } })
+        if (!branch || (restaurantId && branch.restaurantId !== restaurantId)) {
+          return fail('Invalid branch — it does not belong to your restaurant.', 422)
+        }
+        ownerBranchFilter = view
+      }
+    }
+  }
   const tables = await db.table.findMany({
     where: {
       ...(restaurantId ? { restaurantId } : {}),
-      ...(branchId ? { branchId } : {}),
+      ...(staffBranchId
+        ? { branchId: staffBranchId }
+        : ownerBranchFilter !== undefined
+          ? { branchId: ownerBranchFilter }
+          : {}),
     },
     orderBy: { number: 'asc' },
     include: {
