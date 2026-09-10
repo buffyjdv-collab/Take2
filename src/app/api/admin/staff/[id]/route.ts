@@ -157,11 +157,14 @@ export async function PATCH(
 }
 
 // DELETE /api/admin/staff/[id]
+//
+// Permission: STAFF.DELETE (granular RBAC — super admin / owner / manager by
+// default; tunable per-role in the platform RBAC manager).
 export async function DELETE(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { user, error } = await requirePermission('staff.manage')
+  const { user, error } = await requirePermission('STAFF.DELETE')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const { id } = await ctx.params

@@ -80,7 +80,7 @@ export async function POST(
       restaurantAddress: order.restaurant.address,
       restaurantGst: order.restaurant.gstNumber,
       restaurantPhone: order.restaurant.phone,
-      tableNumber: order.table.number,
+      tableNumber: order.table?.number || '-',
       orderNumber: order.orderNumber,
       subtotal: order.subtotal,
       taxAmount: order.taxAmount,

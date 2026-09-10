@@ -34,7 +34,7 @@ export async function POST(
       orderId: order.id,
       orderNumber: order.orderNumber,
       tableId: order.tableId,
-      tableNumber: order.table.number,
+      tableNumber: order.table?.number || '-',
       status: 'CANCELLED',
     },
   })

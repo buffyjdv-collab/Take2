@@ -381,7 +381,6 @@ export function StaffManager() {
                   <th className="p-3">Phone</th>
                   <th className="p-3">Role</th>
                   <th className="p-3">Branch</th>
-                  <th className="p-3">Permissions</th>
                   <th className="p-3">Added</th>
                   <th className="p-3">Active</th>
                   <th className="p-3 text-right">Actions</th>
@@ -389,9 +388,6 @@ export function StaffManager() {
               </thead>
               <tbody>
                 {filtered.map((u: any) => {
-                  const userPerms = Object.entries(PERMISSIONS)
-                    .filter(([, roles]) => roles.includes(u.role))
-                    .map(([perm]) => perm.replace(/\./g, ' ').replace(/_/g, ' '))
                   return (
                     <tr key={u.id} className="border-b last:border-0 hover:bg-slate-50">
                       <td className="p-3 font-medium">
@@ -436,18 +432,6 @@ export function StaffManager() {
                         ) : (
                           <span className="text-slate-300">—</span>
                         )}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex max-w-[200px] flex-wrap gap-1">
-                          {userPerms.slice(0, 4).map((p) => (
-                            <span key={p} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                              {p}
-                            </span>
-                          ))}
-                          {userPerms.length > 4 && (
-                            <span className="text-[10px] text-muted-foreground">+{userPerms.length - 4}</span>
-                          )}
-                        </div>
                       </td>
                       <td className="p-3 text-muted-foreground">
                         <span className="text-xs" title={u.createdAt ? new Date(u.createdAt).toLocaleString() : undefined}>

@@ -88,7 +88,7 @@ export async function PATCH(
     // Also update table status back to BILL_REQUESTED (or AVAILABLE)
     if (order.table) {
       await db.table.update({
-        where: { id: order.tableId },
+        where: { id: order.table.id },
         data: { status: 'BILL_REQUESTED' },
       })
     }
@@ -97,7 +97,7 @@ export async function PATCH(
     // Set table back to AVAILABLE
     if (order.table) {
       await db.table.update({
-        where: { id: order.tableId },
+        where: { id: order.table.id },
         data: { status: 'AVAILABLE' },
       })
     }

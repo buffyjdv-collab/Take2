@@ -551,7 +551,9 @@ model Order {
   orderNumber   String   // human-friendly: SG-000001
   restaurantId  String
   branchId      String?
-  tableId       String
+  // Nullable: when a table is deleted, its orders are PRESERVED with
+  // tableId = null (order history / reports must survive decommissioned tables).
+  tableId       String?
   customerId    String?
   // Status: PENDING_PAYMENT | NEW | ACCEPTED | PREPARING | READY | SERVED | COMPLETED | CANCELLED
   // PENDING_PAYMENT = customer placed the order but hasn't paid yet (pre-payment mode).
@@ -625,7 +627,7 @@ model Order {
 
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   branch        Branch?    @relation(fields: [branchId],   references: [id], onDelete: SetNull)
-  table         Table      @relation(fields: [tableId],    references: [id], onDelete: Cascade)
+  table         Table?     @relation(fields: [tableId],    references: [id], onDelete: SetNull)
   customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
   acceptedBy    User?      @relation("AcceptedOrders", fields: [acceptedById], references: [id])
   servedBy      User?      @relation("ServedOrders",   fields: [servedById],   references: [id])
@@ -769,7 +771,8 @@ model Invoice {
 model ServiceRequest {
   id            String   @id @default(cuid())
   restaurantId  String
-  tableId       String
+  // Nullable: deleting a table detaches its service requests instead of blocking.
+  tableId       String?
   orderId       String?
   // Type: CALL_WAITER | REQUEST_BILL | WATER | CLEANUP | CUSTOM
   type          String
@@ -778,7 +781,7 @@ model ServiceRequest {
   handledById   String?
 
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  table         Table      @relation(fields: [tableId], references: [id])
+  table         Table?     @relation(fields: [tableId], references: [id], onDelete: SetNull)
   order         Order?     @relation(fields: [orderId], references: [id])
   handledBy     User?      @relation(fields: [handledById], references: [id])
 

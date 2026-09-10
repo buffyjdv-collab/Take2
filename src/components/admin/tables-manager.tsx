@@ -30,7 +30,7 @@ import {
 import { useAdminTables, useAdminBranches, api } from '@/hooks/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users, ExternalLink, Copy, Check, MapPin } from 'lucide-react'
+import { Plus, Pencil, QrCode, Download, RefreshCw, Printer, Users, ExternalLink, Copy, Check, MapPin, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { LoadingSpinner, EmptyState, ButtonWithLoading } from '@/components/restaurant/loading-states'
 import { ConfirmDialog } from '@/components/restaurant/confirm-dialog'
@@ -96,7 +96,7 @@ export function TablesManager() {
     try {
       await api(`/api/admin/tables/${t.id}`, { method: 'DELETE' })
       qc.invalidateQueries({ queryKey: ['admin-tables'] })
-      toast.success('Table deleted')
+      toast.success('Table deleted — order history preserved')
     } catch (err: any) {
       toast.error(err.message || 'Failed')
     }
@@ -207,6 +207,7 @@ export function TablesManager() {
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7"
+                      title="Edit"
                       onClick={() => {
                         setEditing(t)
                         setOpen(true)
@@ -214,6 +215,23 @@ export function TablesManager() {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
+                    <ConfirmDialog
+                      trigger={
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-red-600"
+                          title="Delete table"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      }
+                      title={`Delete table ${t.number}?`}
+                      description="This permanently removes the table and its QR code. Past orders are kept in your reports and history."
+                      confirmLabel="Delete"
+                      variant="destructive"
+                      onConfirm={() => handleDelete(t)}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -298,9 +316,13 @@ export function TablesManager() {
           <DialogFooter className="flex justify-between">
             {editing?.id && (
               <ConfirmDialog
-                trigger={<Button variant="destructive"><Plus className="mr-1 h-4 w-4" /> Delete</Button>}
+                trigger={
+                  <Button variant="destructive">
+                    <Trash2 className="mr-1 h-4 w-4" /> Delete
+                  </Button>
+                }
                 title={`Delete table ${editing.number}?`}
-                description="This will permanently remove the table and invalidate its QR code."
+                description="This permanently removes the table and its QR code. Past orders are kept in your reports and history."
                 confirmLabel="Delete"
                 variant="destructive"
                 onConfirm={() => {

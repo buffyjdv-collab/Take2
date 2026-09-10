@@ -116,11 +116,18 @@ export async function PATCH(
 }
 
 // DELETE /api/admin/tables/[id]
+//
+// Permission: TABLE.DELETE (granular RBAC — super admin / owner / manager by
+// default; tunable per-role in the platform RBAC manager).
+//
+// Safety: Order.table and ServiceRequest.table use onDelete: SetNull, so
+// deleting a table PRESERVES its order history (orders keep their financial
+// data with tableId = null). Any unexpected FK blocker returns a friendly 409.
 export async function DELETE(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { user, error } = await requirePermission('tables.manage')
+  const { user, error } = await requirePermission('TABLE.DELETE')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const { id } = await ctx.params
@@ -129,7 +136,18 @@ export async function DELETE(
   if (!table) return fail('Table not found.', 404)
   // Branch-scoped staff can only delete tables of their own branch.
   if (!canActOnBranch(user, table.branchId)) return fail('Table not found.', 404)
-  await db.table.delete({ where: { id } })
+  try {
+    await db.table.delete({ where: { id } })
+  } catch (e: unknown) {
+    // P2003 = foreign key constraint — some record still references the table.
+    if ((e as { code?: string })?.code === 'P2003') {
+      return fail(
+        'This table cannot be deleted because other records still reference it. Deactivate it instead.',
+        409,
+      )
+    }
+    throw e
+  }
   writeAudit(user, 'DELETE', 'TABLE', id, { number: table.number })
   return ok({ deleted: true })
 }

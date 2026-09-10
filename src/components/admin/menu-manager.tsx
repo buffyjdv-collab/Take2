@@ -160,6 +160,18 @@ export function MenuManager() {
     }
   }
 
+  const handleDeleteCategory = async (cat: any) => {
+    try {
+      await api(`/api/admin/menu/categories/${cat.id}`, { method: 'DELETE' })
+      qc.invalidateQueries({ queryKey: ['admin-categories'] })
+      qc.invalidateQueries({ queryKey: ['admin-menu-items'] })
+      if (activeCat === cat.id) setActiveCat('')
+      toast.success('Category deleted')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed')
+    }
+  }
+
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return
     try {
@@ -235,9 +247,30 @@ export function MenuManager() {
                     setEditCat(c)
                   }}
                   className="hidden group-hover:block text-muted-foreground hover:text-orange-600"
+                  title="Edit category"
                 >
                   <Pencil className="h-3 w-3" />
                 </button>
+                <ConfirmDialog
+                  trigger={
+                    <button
+                      onClick={(e) => e.stopPropagation()}
+                      className="hidden group-hover:block text-muted-foreground hover:text-red-600"
+                      title="Delete category"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  }
+                  title={`Delete category "${c.name}"?`}
+                  description={
+                    (c._count?.menuItems || 0) > 0
+                      ? `This category still has ${c._count.menuItems} item(s). Move or delete them first — the category cannot be removed while items are in it.`
+                      : 'This will permanently remove the category.'
+                  }
+                  confirmLabel="Delete"
+                  variant="destructive"
+                  onConfirm={() => handleDeleteCategory(c)}
+                />
               </div>
             ))}
           {activeCat && (
@@ -852,9 +885,22 @@ function CategoryEditor({
           </div>
         </div>
         <DialogFooter className="flex justify-between">
-          <Button variant="destructive" onClick={handleDelete}>
-            <Trash2 className="mr-2 h-4 w-4" /> Delete
-          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button variant="destructive">
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </Button>
+            }
+            title={`Delete category "${category?.name}"?`}
+            description={
+              (category?._count?.menuItems || 0) > 0
+                ? `This category still has ${category?._count?.menuItems} item(s). Move or delete them first.`
+                : 'This will permanently remove the category.'
+            }
+            confirmLabel="Delete"
+            variant="destructive"
+            onConfirm={handleDelete}
+          />
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={handleSave} className="bg-orange-600 text-white hover:bg-orange-700">

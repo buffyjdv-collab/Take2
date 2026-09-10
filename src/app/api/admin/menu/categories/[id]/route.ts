@@ -86,11 +86,15 @@ export async function PATCH(
 }
 
 // DELETE /api/admin/menu/categories/[id]
+//
+// Permission: MENU_CATEGORY.DELETE (granular RBAC — super admin / owner /
+// manager by default; tunable per-role in the platform RBAC manager).
+// A category with menu items is refused — move or delete its items first.
 export async function DELETE(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { user, error } = await requirePermission('menu.delete')
+  const { user, error } = await requirePermission('MENU_CATEGORY.DELETE')
   if (error) return error
   if (!user) return fail('Unauthorized', 401)
   const { id } = await ctx.params

@@ -74,7 +74,11 @@ export async function POST(req: NextRequest) {
   if (user.role !== 'SUPER_ADMIN' && !user.restaurantId) {
     return fail('You are not assigned to a restaurant.', 400)
   }
-  const restaurantId = user.restaurantId as string
+  // Super admins operate on a tenant via ?restaurantId= (same as GET/PATCH/DELETE).
+  const restaurantId = scopeRestaurantId(user, req.nextUrl.searchParams.get('restaurantId'))
+  if (!restaurantId) {
+    return fail('Super admin must pass ?restaurantId= of the target restaurant.', 400)
+  }
 
   let body: unknown
   try {
