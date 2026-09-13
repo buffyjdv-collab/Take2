@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Sheet,
   SheetContent,
@@ -34,12 +34,93 @@ import { Price, formatINR } from '@/components/restaurant/price'
 import { VegBadge } from '@/components/restaurant/veg-badge'
 import { EmptyState, LoadingSpinner } from '@/components/restaurant/loading-states'
 import { useAdminOrders, useAdminOrder, useUpdateOrderStatus, useRequestPayment, useMarkCashPaid, useAdminBranches, api } from '@/hooks/api'
-import { Search, Filter, X, Clock, ChefHat, CheckCircle2, BellRing, Utensils, XCircle, Phone, User, CreditCard, Banknote } from 'lucide-react'
+import { Search, Filter, X, Clock, ChefHat, CheckCircle2, BellRing, Utensils, XCircle, Phone, User, CreditCard, Banknote, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSession } from 'next-auth/react'
+import { cn } from '@/lib/utils'
 import type { OrderStatus } from '@/lib/types'
 
 const STATUSES: OrderStatus[] = ['NEW', 'ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'COMPLETED', 'CANCELLED']
+
+// ---------------------------------------------------------------------------
+// Date grouping for the collapsible orders list
+// ---------------------------------------------------------------------------
+
+interface DateGroup {
+  /** Stable per-day key (local calendar day) used for collapse state. */
+  key: string
+  /** Human label: "Today", "Yesterday", or "Mon, 8 Sep 2026". */
+  label: string
+  orders: any[]
+  /** Sum of grandTotal excluding CANCELLED orders (shown in the header). */
+  netTotal: number
+}
+
+function groupOrdersByDate(orders: any[]): DateGroup[] {
+  const groups: DateGroup[] = []
+  const byKey = new Map<string, DateGroup>()
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfYesterday = startOfToday - 86_400_000
+
+  for (const o of orders) {
+    const d = new Date(o.placedAt)
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    let g = byKey.get(key)
+    if (!g) {
+      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+      const label =
+        dayStart === startOfToday
+          ? `Today · ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+          : dayStart === startOfYesterday
+            ? `Yesterday · ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+            : d.toLocaleDateString('en-IN', {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })
+      g = { key, label, orders: [], netTotal: 0 }
+      byKey.set(key, g)
+      groups.push(g)
+    }
+    g.orders.push(o)
+    if (o.status !== 'CANCELLED') g.netTotal += Number(o.grandTotal) || 0
+  }
+  return groups
+}
+
+/** One row in a day's orders table (shared by every date group). */
+function OrderRow({ order: o, onOpen }: { order: any; onOpen: () => void }) {
+  return (
+    <tr className="border-b last:border-0 hover:bg-slate-50 cursor-pointer" onClick={onOpen}>
+      <td className="p-3 font-medium">{o.orderNumber}</td>
+      <td className="p-3">
+        {o.table?.number}
+        {o.branch?.name && (
+          <span className="ml-1.5 rounded-full bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+            {o.branch.name}
+          </span>
+        )}
+      </td>
+      <td className="p-3 text-muted-foreground">
+        {new Date(o.placedAt).toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
+      </td>
+      <td className="p-3">{o._count?.items || o.items?.length || 0}</td>
+      <td className="p-3 font-semibold">{formatINR(o.grandTotal)}</td>
+      <td className="p-3"><OrderStatusBadge status={o.status} /></td>
+      <td className="p-3"><PaymentStatusBadge status={o.paymentStatus} /></td>
+      <td className="p-3 text-right">
+        <Button size="sm" variant="ghost">
+          View →
+        </Button>
+      </td>
+    </tr>
+  )
+}
 
 export function OrdersManager() {
   const { data: session } = useSession()
@@ -70,6 +151,25 @@ export function OrdersManager() {
     branchView === 'none'
       ? 'branchless orders'
       : branches.find((b: any) => b.id === branchView)?.name
+
+  // ---- Date grouping (collapsible by day) ----
+  // Orders arrive sorted by placedAt desc, so groups are newest-first and the
+  // first group is the most recent day (usually today) — the one expanded by
+  // default. Toggling is tracked per day-key; days the user hasn't touched
+  // fall back to "recent expanded / older collapsed" automatically, so a new
+  // day rolling over never needs state migration.
+  const [manualExpanded, setManualExpanded] = useState<Map<string, boolean>>(new Map())
+  const dateGroups = useMemo(() => groupOrdersByDate(data?.orders || []), [data?.orders])
+  const isGroupExpanded = (key: string, isMostRecent: boolean) =>
+    manualExpanded.get(key) ?? isMostRecent
+  const toggleGroup = (key: string) =>
+    setManualExpanded((m) => {
+      const next = new Map(m)
+      const gi = dateGroups.findIndex((g) => g.key === key)
+      const current = isGroupExpanded(key, gi === 0)
+      next.set(key, !current)
+      return next
+    })
 
   return (
     <div className="space-y-4 p-4 lg:p-6">
@@ -165,7 +265,8 @@ export function OrdersManager() {
         </CardContent>
       </Card>
 
-      {/* Orders table */}
+      {/* Orders grouped by date — the most recent day (usually today) is
+          expanded by default, older days start collapsed. */}
       {isLoading ? (
         <div className="flex justify-center py-10">
           <LoadingSpinner size="lg" />
@@ -178,56 +279,58 @@ export function OrdersManager() {
         />
       ) : (
         <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-slate-50 text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="p-3">Order #</th>
-                  <th className="p-3">Table</th>
-                  <th className="p-3">Placed</th>
-                  <th className="p-3">Items</th>
-                  <th className="p-3">Total</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Payment</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.orders.map((o: any) => (
-                  <tr
-                    key={o.id}
-                    className="border-b last:border-0 hover:bg-slate-50 cursor-pointer"
-                    onClick={() => setSelectedId(o.id)}
-                  >
-                    <td className="p-3 font-medium">{o.orderNumber}</td>
-                    <td className="p-3">
-                      {o.table?.number}
-                      {o.branch?.name && (
-                        <span className="ml-1.5 rounded-full bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-                          {o.branch.name}
-                        </span>
+          {dateGroups.map((g, gi) => {
+            const expanded = isGroupExpanded(g.key, gi === 0)
+            return (
+              <div key={g.key} className="border-b last:border-0">
+                {/* Day header — click to collapse/expand */}
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(g.key)}
+                  className="flex w-full items-center justify-between gap-2 bg-slate-50 px-3 py-2.5 text-left transition-colors hover:bg-slate-100"
+                >
+                  <span className="flex items-center gap-2">
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                        !expanded && '-rotate-90',
                       )}
-                    </td>
-                    <td className="p-3 text-muted-foreground">
-                      {new Date(o.placedAt).toLocaleTimeString('en-IN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </td>
-                    <td className="p-3">{o._count?.items || o.items?.length || 0}</td>
-                    <td className="p-3 font-semibold">{formatINR(o.grandTotal)}</td>
-                    <td className="p-3"><OrderStatusBadge status={o.status} /></td>
-                    <td className="p-3"><PaymentStatusBadge status={o.paymentStatus} /></td>
-                    <td className="p-3 text-right">
-                      <Button size="sm" variant="ghost">
-                        View →
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    />
+                    <span className="text-sm font-semibold">{g.label}</span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-slate-200">
+                      {g.orders.length} {g.orders.length === 1 ? 'order' : 'orders'}
+                    </span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {g.netTotal > 0 ? `${formatINR(g.netTotal)} (excl. cancelled)` : ''}
+                  </span>
+                </button>
+                {expanded && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b bg-white text-left text-xs text-muted-foreground">
+                        <tr>
+                          <th className="p-3">Order #</th>
+                          <th className="p-3">Table</th>
+                          <th className="p-3">Placed</th>
+                          <th className="p-3">Items</th>
+                          <th className="p-3">Total</th>
+                          <th className="p-3">Status</th>
+                          <th className="p-3">Payment</th>
+                          <th className="p-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.orders.map((o: any) => (
+                          <OrderRow key={o.id} order={o} onOpen={() => setSelectedId(o.id)} />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </Card>
       )}
 
