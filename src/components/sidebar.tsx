@@ -129,35 +129,19 @@ export function Sidebar({
     : []
   const platformItems = visible.filter((n) => n.group === 'platform')
   const restaurantItems = visible.filter((n) => n.group === 'restaurant')
-  const isPlatformView = activeKey.startsWith('platform-')
-
   return (
     <aside className="flex h-full w-[240px] flex-col border-r border-slate-200 bg-white">
-      <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-600 text-white overflow-hidden">
+      <div className="border-b border-slate-200 px-3 py-3">
+        <div className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg bg-slate-50">
           {restaurantLogo ? (
             <img
               src={restaurantLogo}
               alt={restaurantName || 'Restaurant logo'}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain p-1"
             />
           ) : (
-            <QrCode className="h-5 w-5" />
+            <QrCode className="h-8 w-8 text-orange-600" />
           )}
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold leading-tight">
-            {role === 'SUPER_ADMIN' && isPlatformView
-              ? 'QR Dine Platform'
-              : restaurantName || 'QR Dine'}
-          </p>
-          <p className="text-[10px] text-muted-foreground">
-            {role === 'SUPER_ADMIN' && isPlatformView
-              ? 'Super Admin Console'
-              : branchName
-              ? `${branchName} · Branch view`
-              : 'Restaurant OS'}
-          </p>
         </div>
       </div>
 
