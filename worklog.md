@@ -793,3 +793,48 @@ Stage Summary:
 - Commit 45cce97 on main. PUSHED to origin/main (19274cb..45cce97 fast-forward) with user-supplied PAT.
 - 15 files changed: schema, 8 API routes, 3 admin components, E2E script.
 - User-visible: owners/managers/admins can now delete tables (cards + dialog), categories (strip hover + editor), staff (row action, soft delete) — all with confirmations; staff table no longer shows the Permissions column; deleting a table no longer destroys its order history.
+
+---
+Task ID: sidebar-logo-only
+Agent: Main (Super Z)
+Task: Remove restaurant name from sidebar header; keep only the logo image, full-width in the sidebar
+
+Work Log:
+- Cloned https://github.com/buffyjdv-collab/Take2.git into /home/z/my-project/Take2
+- Inspected src/components/sidebar.tsx and src/components/app-shell.tsx to understand the brand header layout
+- Removed the restaurant name / branch sub-text container from the sidebar header (lines 136-162)
+- Replaced the small h-9 w-9 logo box with a full-width h-16 container that uses object-contain so the logo keeps its aspect ratio while filling the sidebar width
+- Kept the QrCode fallback for the no-logo case (e.g. super admin view)
+- Removed the now-unused isPlatformView helper
+- Committed the change (c09f62f) on branch main
+- Attempted to push to origin/main but the sandbox has no GitHub credentials; user needs to push from their own machine
+
+Stage Summary:
+- Sidebar header now shows only the restaurant logo, full-width, with no restaurant name text
+- Fallback to QrCode icon preserved for super admin / no-logo case
+- Commit c09f62f is local only — user must run `git push origin main` (or pull this commit) to publish
+- Files changed: src/components/sidebar.tsx (+4 / -20 lines)
+
+---
+Task ID: branches-collapsible
+Agent: Main (Super Z)
+Task: Make each branch card in the BranchesManager collapsible
+
+Work Log:
+- Inspected src/components/admin/branches-manager.tsx — branch cards were always-expanded in a 2-col grid
+- Added imports: Collapsible, CollapsibleTrigger, CollapsibleContent (Radix) + ChevronDown, ChevronsDownUp, ChevronsUpDown (lucide)
+- Added `collapsed: Set<string>` state plus toggleBranch / expandAll / collapseAll helpers and an `allCollapsed` memo
+- Wrapped each Card body in <Collapsible>; header (name, status pill, address, phone, edit/delete) is the CollapsibleTrigger and always visible
+- Moved sales stats / pending approvals / top products / tables+team / footer actions (add manager + active switch) into <CollapsibleContent>
+- Added a compact summary line (today orders · today revenue · table count · staff count · pending approvals) that only shows when collapsed, so collapsed cards still convey key info
+- Edit / delete buttons stopPropagation so they don't toggle the card
+- Added "Expand all" / "Collapse all" outline button in the page header (visible only when 2+ branches exist); label/icon flips based on `allCollapsed`
+- All branches default to expanded (preserves existing UX)
+- Verified: `npx tsc --noEmit` → exit 0; `npx eslint src/components/admin/branches-manager.tsx` → exit 0
+
+Stage Summary:
+- Branch cards now collapse/expand individually via click on the header; chevron rotates 90° when collapsed
+- "Collapse all" / "Expand all" button at the top manages every card at once
+- Collapsed state shows a one-line summary so users still get key stats without expanding
+- Files changed: src/components/admin/branches-manager.tsx
+- Local commit pending push

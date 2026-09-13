@@ -1,11 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible'
 import {
   Dialog,
   DialogContent,
@@ -36,6 +41,9 @@ import {
   Store,
   Users,
   Clock,
+  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { LoadingSpinner, EmptyState, ButtonWithLoading } from '@/components/restaurant/loading-states'
@@ -163,6 +171,31 @@ export function BranchesManager() {
   const [unassignBusyId, setUnassignBusyId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
+  // Collapsible branch cards — by default every branch is expanded so the
+  // existing UX is unchanged. Users can collapse individual cards to reduce
+  // visual noise when they have many locations.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+
+  const branches = data?.branches || []
+  const totals = data?.totals
+  const unassigned = data?.unassigned
+
+  const toggleBranch = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const expandAll = () => setCollapsed(new Set())
+  const collapseAll = () => setCollapsed(new Set(branches.map((b) => b.id)))
+
+  const allCollapsed = useMemo(() => {
+    if (!branches.length) return false
+    return branches.every((b) => collapsed.has(b.id))
+  }, [branches, collapsed])
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin-branches'] })
     qc.invalidateQueries({ queryKey: ['admin-staff'] })
@@ -288,10 +321,6 @@ export function BranchesManager() {
     }
   }
 
-  const branches = data?.branches || []
-  const totals = data?.totals
-  const unassigned = data?.unassigned
-
   return (
     <div className="space-y-4 p-4 lg:p-6">
       {/* Header */}
@@ -302,9 +331,29 @@ export function BranchesManager() {
             {branches.length} location{branches.length === 1 ? '' : 's'} · sales, products &amp; teams across all of them
           </p>
         </div>
-        <Button onClick={handleNew} className="bg-orange-600 text-white hover:bg-orange-700">
-          <Plus className="mr-2 h-4 w-4" /> Add branch
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {branches.length > 1 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={allCollapsed ? expandAll : collapseAll}
+              title={allCollapsed ? 'Expand all branches' : 'Collapse all branches'}
+            >
+              {allCollapsed ? (
+                <>
+                  <ChevronsUpDown className="mr-1.5 h-4 w-4" /> Expand all
+                </>
+              ) : (
+                <>
+                  <ChevronsDownUp className="mr-1.5 h-4 w-4" /> Collapse all
+                </>
+              )}
+            </Button>
+          )}
+          <Button onClick={handleNew} className="bg-orange-600 text-white hover:bg-orange-700">
+            <Plus className="mr-2 h-4 w-4" /> Add branch
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -358,139 +407,175 @@ export function BranchesManager() {
 
           {/* Branch cards */}
           <div className="grid gap-4 lg:grid-cols-2">
-            {branches.map((b) => (
-              <Card key={b.id} className={b.active ? '' : 'opacity-70'}>
-                <CardContent className="space-y-4 p-4">
-                  {/* Title row */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h2 className="truncate text-lg font-bold">{b.name}</h2>
-                        <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                            b.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {b.active ? 'Active' : 'Disabled'}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                        <MapPin className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{b.address}</span>
-                      </p>
-                      {b.phone && (
-                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                          <Phone className="h-3 w-3 shrink-0" /> {b.phone}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleEdit(b)}
-                        aria-label={`Edit ${b.name}`}
-                        className="h-8 w-8"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setDeleteTarget(b)}
-                        aria-label={`Delete ${b.name}`}
-                        className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
+            {branches.map((b) => {
+              const isCollapsed = collapsed.has(b.id)
+              return (
+                <Card key={b.id} className={b.active ? '' : 'opacity-70'}>
+                  <CardContent className="p-4">
+                    <Collapsible open={!isCollapsed} onOpenChange={(open) => toggleBranch(b.id)}>
+                      {/* Title row — always visible. Whole header is the trigger
+                          so clicking anywhere on it toggles, but the edit /
+                          delete buttons stop propagation so they still work. */}
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-start justify-between gap-2 cursor-pointer select-none">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <ChevronDown
+                                className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${
+                                  isCollapsed ? '-rotate-90' : 'rotate-0'
+                                }`}
+                              />
+                              <h2 className="truncate text-lg font-bold">{b.name}</h2>
+                              <span
+                                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                  b.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {b.active ? 'Active' : 'Disabled'}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 flex items-center gap-1 pl-6 text-xs text-muted-foreground">
+                              <MapPin className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{b.address}</span>
+                            </p>
+                            {b.phone && (
+                              <p className="mt-0.5 flex items-center gap-1 pl-6 text-xs text-muted-foreground">
+                                <Phone className="h-3 w-3 shrink-0" /> {b.phone}
+                              </p>
+                            )}
+                            {/* Compact summary shown only when collapsed */}
+                            {isCollapsed && (
+                              <p className="mt-1.5 pl-6 text-[11px] text-slate-500">
+                                {b.stats.todayOrders} order{b.stats.todayOrders === 1 ? '' : 's'} today ·{' '}
+                                {formatINR(b.stats.todayRevenue)} · {b.tableCount} table
+                                {b.tableCount === 1 ? '' : 's'} · {b.users.length} staff
+                                {!!b.pendingApprovals?.total && (
+                                  <span className="ml-1 text-amber-700">
+                                    · {b.pendingApprovals.total} pending approval
+                                    {b.pendingApprovals.total === 1 ? '' : 's'}
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                          <div
+                            className="flex shrink-0 items-center gap-1"
+                            // Prevent the header trigger from firing when the
+                            // action buttons are clicked.
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEdit(b)}
+                              aria-label={`Edit ${b.name}`}
+                              className="h-8 w-8"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setDeleteTarget(b)}
+                              aria-label={`Delete ${b.name}`}
+                              className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </CollapsibleTrigger>
 
-                  {/* Sales stats */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <StatBlock
-                      label="Today"
-                      value={formatINR(b.stats.todayRevenue)}
-                      sub={`${b.stats.todayOrders} order${b.stats.todayOrders === 1 ? '' : 's'}`}
-                      icon={IndianRupee}
-                    />
-                    <StatBlock
-                      label="Last 7 days"
-                      value={formatINR(b.stats.weekRevenue)}
-                      sub={`${b.stats.weekOrders} order${b.stats.weekOrders === 1 ? '' : 's'}`}
-                      icon={TrendingUp}
-                    />
-                  </div>
+                      {/* Collapsible body */}
+                      <CollapsibleContent className="space-y-4 pt-4 data-[state=closed]:hidden">
+                        {/* Sales stats */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <StatBlock
+                            label="Today"
+                            value={formatINR(b.stats.todayRevenue)}
+                            sub={`${b.stats.todayOrders} order${b.stats.todayOrders === 1 ? '' : 's'}`}
+                            icon={IndianRupee}
+                          />
+                          <StatBlock
+                            label="Last 7 days"
+                            value={formatINR(b.stats.weekRevenue)}
+                            sub={`${b.stats.weekOrders} order${b.stats.weekOrders === 1 ? '' : 's'}`}
+                            icon={TrendingUp}
+                          />
+                        </div>
 
-                  {/* Pending owner approvals for this branch */}
-                  {!!b.pendingApprovals?.total && (
-                    <a
-                      href="#approvals"
-                      className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100"
-                    >
-                      <Clock className="h-3.5 w-3.5" />
-                      {b.pendingApprovals.total} creation{b.pendingApprovals.total === 1 ? '' : 's'}
-                      awaiting your approval
-                      <span className="text-amber-600">
-                        ({b.pendingApprovals.categories} menu · {b.pendingApprovals.items} items ·{' '}
-                        {b.pendingApprovals.tables} tables · {b.pendingApprovals.staff} staff)
-                      </span>
-                    </a>
-                  )}
+                        {/* Pending owner approvals for this branch */}
+                        {!!b.pendingApprovals?.total && (
+                          <a
+                            href="#approvals"
+                            className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                          >
+                            <Clock className="h-3.5 w-3.5" />
+                            {b.pendingApprovals.total} creation{b.pendingApprovals.total === 1 ? '' : 's'}
+                            awaiting your approval
+                            <span className="text-amber-600">
+                              ({b.pendingApprovals.categories} menu · {b.pendingApprovals.items} items ·{' '}
+                              {b.pendingApprovals.tables} tables · {b.pendingApprovals.staff} staff)
+                            </span>
+                          </a>
+                        )}
 
-                  {/* Products monitoring */}
-                  <div>
-                    <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <ShoppingBag className="h-3.5 w-3.5" /> Top products (7 days)
-                    </p>
-                    <TopItems items={b.stats.topItems} />
-                  </div>
+                        {/* Products monitoring */}
+                        <div>
+                          <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <ShoppingBag className="h-3.5 w-3.5" /> Top products (7 days)
+                          </p>
+                          <TopItems items={b.stats.topItems} />
+                        </div>
 
-                  {/* Tables + team */}
-                  <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
-                    <div>
-                      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        <Table2 className="h-3.5 w-3.5" /> Tables
-                      </p>
-                      <p className="text-sm text-slate-700">
-                        {b.tableCount} table{b.tableCount === 1 ? '' : 's'} assigned
-                      </p>
-                    </div>
-                    <div>
-                      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        <UserRoundCog className="h-3.5 w-3.5" /> Branch team
-                      </p>
-                      <ManagerChips
-                        branch={b}
-                        busyId={unassignBusyId}
-                        onUnassign={(u) => setUnassignTarget({ branch: b, user: u })}
-                      />
-                    </div>
-                  </div>
+                        {/* Tables + team */}
+                        <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
+                          <div>
+                            <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <Table2 className="h-3.5 w-3.5" /> Tables
+                            </p>
+                            <p className="text-sm text-slate-700">
+                              {b.tableCount} table{b.tableCount === 1 ? '' : 's'} assigned
+                            </p>
+                          </div>
+                          <div>
+                            <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <UserRoundCog className="h-3.5 w-3.5" /> Branch team
+                            </p>
+                            <ManagerChips
+                              branch={b}
+                              busyId={unassignBusyId}
+                              onUnassign={(u) => setUnassignTarget({ branch: b, user: u })}
+                            />
+                          </div>
+                        </div>
 
-                  {/* Footer actions */}
-                  <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleAddManager(b)}
-                      className="border-orange-200 text-orange-700 hover:bg-orange-50"
-                    >
-                      <UserRoundCog className="mr-1.5 h-4 w-4" /> Add manager
-                    </Button>
-                    <div className="ml-auto flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">{b.active ? 'Enabled' : 'Disabled'}</span>
-                      <Switch
-                        checked={b.active}
-                        disabled={togglingId === b.id}
-                        onCheckedChange={() => handleToggleActive(b)}
-                        aria-label={`Toggle ${b.name}`}
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                        {/* Footer actions */}
+                        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAddManager(b)}
+                            className="border-orange-200 text-orange-700 hover:bg-orange-50"
+                          >
+                            <UserRoundCog className="mr-1.5 h-4 w-4" /> Add manager
+                          </Button>
+                          <div className="ml-auto flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{b.active ? 'Enabled' : 'Disabled'}</span>
+                            <Switch
+                              checked={b.active}
+                              disabled={togglingId === b.id}
+                              onCheckedChange={() => handleToggleActive(b)}
+                              aria-label={`Toggle ${b.name}`}
+                            />
+                          </div>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         </>
       )}
